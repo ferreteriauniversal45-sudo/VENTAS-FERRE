@@ -1,13 +1,3 @@
-/* =========================================================
-   Ferretería Universal - App VENDEDOR (Clientes + Cotizaciones)
-   - Clientes locales (permanentes)
-   - Cotizaciones locales
-   - Selección de cliente por modal (buscar / crear)
-   - Agregar producto por modal (cantidad + tipo de precio + ver precios)
-   - Tipos de precio mezclados por producto + PRECIO VENDEDOR
-   - PDF tipo ticket (80mm) + marca de agua + compartir/descargar
-   ========================================================= */
-
 /* ================= CONFIG ================= */
 const BASE_RAW = "https://raw.githubusercontent.com/ferreteriauniversal45-sudo/ferreteria-inventario-app/main/";
 const URLS = {
@@ -23,15 +13,7 @@ const PINS = {
   ADMIN: "ADMIN2024"
 };
 
-const PRICE_TYPES = [
-  "precio",
-  "precioA",
-  "precioB",
-  "precioC",
-  "mayoreo",
-  "precioVendedor" // NUEVO: precio manual por el vendedor
-];
-
+const PRICE_TYPES = ["precio","precioA","precioB","precioC","mayoreo","precioVendedor"];
 const PRICE_LABELS = {
   precio: "Precio Público",
   precioA: "Precio A",
@@ -42,36 +24,15 @@ const PRICE_LABELS = {
 };
 
 /* ================= HELPERS ================= */
-function moneyL(value) {
+const el = (id) => document.getElementById(id);
+
+function moneyL(value){
+  // ✅ coma para miles + punto decimal: 1,250.00
   const n = Number(value || 0);
-  // Forzamos coma para miles (1,234.56)
-  return "L. " + n.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  });
+  return "L. " + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function trunc(s, max = 42) {
-  if (!s) return "";
-  s = String(s);
-  return s.length > max ? s.slice(0, max - 1) + "…" : s;
-}
-
-function nowStr() {
-  return new Date().toLocaleString("es-HN");
-}
-
-function makeId() {
-  return Date.now() + Math.floor(Math.random() * 1000000);
-}
-
-async function fetchJson(url) {
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`HTTP ${res.status} en ${url}`);
-  return await res.json();
-}
-
-function escapeHtml(s) {
+function escapeHtml(s){
   return String(s ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -80,121 +41,78 @@ function escapeHtml(s) {
     .replaceAll("'", "&#039;");
 }
 
-function nonEmpty(s) {
-  return (s || "").toString().trim().length > 0;
+function openModal(id){ el(id).classList.add("show"); }
+function closeModal(id){ el(id).classList.remove("show"); }
+
+function nowStr(){
+  return new Date().toLocaleString("es-HN");
+}
+
+async function fetchJson(url){
+  const res = await fetch(url, { cache: "no-store" });
+  if(!res.ok) throw new Error(`HTTP ${res.status} - ${url}`);
+  return await res.json();
 }
 
 /* ================= STATE ================= */
 let selectedRole = null;
 
-// Persistentes (NO borrar al logout)
 let nombreVendedor = localStorage.getItem("nombreVendedor") || "";
-let clientes = JSON.parse(localStorage.getItem("clientes") || "[]");
-let cotizaciones = JSON.parse(localStorage.getItem("cotizaciones") || "[]");
 
-// Catálogo remoto
+let clientes = JSON.parse(localStorage.getItem("clientes") || "[]");          // ✅ NO se borran
+let cotizaciones = JSON.parse(localStorage.getItem("cotizaciones") || "[]");  // ✅ NO se borran
+
 let catalogo = [];               // [{codigo, producto, departamento, stockTotal, precios:{...}}]
 let catalogoMap = new Map();     // codigo -> obj
 let catalogoCargado = false;
 
-// Cotización actual
-let cotizacionActual = null;     // {id, fecha, clienteId, defaultPriceType, items:[{id,codigo,qty,priceType,customPrice}]}
+let cotizacionActual = null;     // {id, fecha, clienteId, items:[]}
+let pendingAction = null;
 
-// Modal producto (estado)
-let productoModal = null;        // {codigo, ...}
+let selectedProductCode = null;
 
-// PDF generado (para compartir/descargar)
-let lastFile = {
-  blob: null,
-  url: null,
-  filename: "documento.pdf",
-  mime: "application/pdf",
-  title: "",
-  text: ""
-};
-
+// PDF file last
+let lastFile = { blob:null, url:null, filename:"cotizacion.pdf", mime:"application/pdf", title:"", text:"" };
 let logoDataUrlCache = null;
 
 /* ================= ELEMENTS ================= */
-const loginScreen = document.getElementById("login");
-const appScreen = document.getElementById("app");
-const pinBox = document.getElementById("pinBox");
-const pinInput = document.getElementById("pin");
-const pinError = document.getElementById("pinError");
-const roleText = document.getElementById("roleText");
+const loginScreen = el("login");
+const appScreen = el("app");
 
-const vendedorHome = document.getElementById("vendedorHome");
-const contenido = document.getElementById("contenido");
-const headerTitle = document.getElementById("headerTitle");
+const pinBox = el("pinBox");
+const pinInput = el("pin");
+const pinError = el("pinError");
+const roleText = el("roleText");
 
-const modalVendedor = document.getElementById("modalVendedor");
-const modalClientes = document.getElementById("modalClientes");
-const modalNuevoCliente = document.getElementById("modalNuevoCliente");
-const modalProducto = document.getElementById("modalProducto");
+const vendedorHome = el("vendedorHome");
+const contenido = el("contenido");
 
-// Inputs / containers de modales
-const buscarClienteInput = document.getElementById("buscarClienteInput");
-const listaClientesModal = document.getElementById("listaClientesModal");
-
-// Nuevo cliente
-const ncNombre = document.getElementById("ncNombre");
-const ncEmpresa = document.getElementById("ncEmpresa");
-const ncTelefono = document.getElementById("ncTelefono");
-const ncRTN = document.getElementById("ncRTN");
-const ncUbicacion = document.getElementById("ncUbicacion");
-
-// Modal producto
-const mpNombre = document.getElementById("mpNombre");
-const mpMeta = document.getElementById("mpMeta");
-const mpListaPrecios = document.getElementById("mpListaPrecios");
-const mpCantidad = document.getElementById("mpCantidad");
-const mpTipoPrecio = document.getElementById("mpTipoPrecio");
-const mpPrecioManualWrap = document.getElementById("mpPrecioManualWrap");
-const mpPrecioValor = document.getElementById("mpPrecioValor");
-const mpTotalLinea = document.getElementById("mpTotalLinea");
+const headerTitle = el("headerTitle");
 
 /* ================= INIT ================= */
-if (localStorage.getItem("role")) {
-  startApp();
-}
-
-pinInput?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") validatePin();
-});
-
-buscarClienteInput?.addEventListener("input", () => {
-  renderListaClientesModal();
-});
-
-// Producto modal: recalcular total en vivo
-mpCantidad?.addEventListener("input", () => actualizarProductoModalTotal());
-mpTipoPrecio?.addEventListener("change", () => {
-  togglePrecioManual();
-  actualizarProductoModalTotal();
-});
-mpPrecioValor?.addEventListener("input", () => actualizarProductoModalTotal());
+if (localStorage.getItem("role")) startApp();
 
 /* ================= LOGIN ================= */
-function selectRole(role) {
+function selectRole(role){
   selectedRole = role;
   roleText.textContent = `Rol: ${role}`;
-  document.getElementById("roles").style.display = "none";
+  el("roles").style.display = "none";
   pinError.classList.add("hidden");
   pinBox.classList.remove("hidden");
   pinInput.value = "";
   pinInput.focus();
 }
 
-function resetLogin() {
+function resetLogin(){
   selectedRole = null;
   pinInput.value = "";
   pinError.classList.add("hidden");
-  document.getElementById("roles").style.display = "block";
+  el("roles").style.display = "block";
   pinBox.classList.add("hidden");
   roleText.textContent = "Selecciona un rol";
 }
 
-function validatePin() {
+function validatePin(){
   if (!selectedRole) return;
 
   if (pinInput.value === PINS[selectedRole]) {
@@ -205,20 +123,22 @@ function validatePin() {
   }
 }
 
-function startApp() {
-  // Ocultar login fuerte (evita overlays)
+pinInput?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") validatePin();
+});
+
+function startApp(){
+  // ocultar login de forma fuerte
   loginScreen.classList.add("hidden");
   loginScreen.style.display = "none";
 
-  // Mostrar app
   appScreen.classList.remove("hidden");
   appScreen.style.display = "block";
 
-  // limpiar vistas
+  const role = localStorage.getItem("role");
+
   vendedorHome.classList.add("hidden");
   contenido.classList.add("hidden");
-
-  const role = localStorage.getItem("role");
 
   if (role === "VENDEDOR") {
     headerTitle.textContent = "Cotizaciones";
@@ -228,255 +148,65 @@ function startApp() {
     contenido.innerHTML = `
       <div class="card">
         <strong>⚠️ Rol no implementado</strong>
-        <div class="note">Por ahora este módulo está hecho para <b>VENDEDOR</b>.</div>
+        <div style="color:#6B7280; margin-top:6px;">
+          Actualmente este módulo está listo para <b>VENDEDOR</b>.
+        </div>
       </div>
     `;
   }
 }
 
-function logout() {
-  // NO borrar clientes/cotizaciones/nombreVendedor
+function logout(){
+  // ✅ NO borrar clientes/cotizaciones/nombreVendedor
   localStorage.removeItem("role");
   location.reload();
 }
 
 /* ================= MODAL VENDEDOR ================= */
-function abrirModalVendedor() {
-  modalVendedor.classList.add("show");
-  const input = document.getElementById("nombreVendedorInput");
-  input.value = nombreVendedor || "";
-  setTimeout(() => input.focus(), 50);
+function abrirModalVendedor(){
+  el("nombreVendedorInput").value = nombreVendedor || "";
+  openModal("modalVendedor");
+  setTimeout(() => el("nombreVendedorInput").focus(), 50);
 }
 
-function cerrarModalVendedor() {
-  modalVendedor.classList.remove("show");
+function cerrarModalVendedor(){
+  pendingAction = null;
+  closeModal("modalVendedor");
 }
 
-function guardarNombreVendedor() {
-  const input = document.getElementById("nombreVendedorInput");
-  const val = (input.value || "").trim();
-  if (!val) return;
+function guardarNombreVendedor(){
+  const v = (el("nombreVendedorInput").value || "").trim();
+  if (!v) return;
 
-  nombreVendedor = val;
+  nombreVendedor = v;
   localStorage.setItem("nombreVendedor", nombreVendedor);
-  modalVendedor.classList.remove("show");
+  closeModal("modalVendedor");
 
-  // Reanudar acción pendiente (si existe)
-  const pending = localStorage.getItem("accionPendiente");
-  if (pending) {
-    localStorage.removeItem("accionPendiente");
-    const obj = JSON.parse(pending);
+  // reanudar acción pendiente
+  if (pendingAction) {
+    const action = pendingAction;
+    pendingAction = null;
 
-    if (obj.type === "cot_guardar") guardarCotizacion(true);
-    if (obj.type === "cot_pdf") generarPdfCotizacion(true);
+    if (action.type === "pdf") generarPdfCotizacion(true);
+    if (action.type === "guardar") guardarCotizacion(true);
   }
 }
 
-function ensureNombreVendedor(pendingObj) {
-  if (nonEmpty(nombreVendedor)) return true;
-  localStorage.setItem("accionPendiente", JSON.stringify(pendingObj));
+function ensureNombreVendedor(actionObj){
+  if (nombreVendedor && nombreVendedor.trim()) return true;
+  pendingAction = actionObj;
   abrirModalVendedor();
   return false;
 }
 
-/* ================= NAV ================= */
-function volverHome() {
-  contenido.classList.add("hidden");
-  vendedorHome.classList.remove("hidden");
-}
-
-/* ================= CLIENTES (pantalla de administración) ================= */
-function abrirClientes() {
-  vendedorHome.classList.add("hidden");
-  contenido.classList.remove("hidden");
-
-  const rows = clientes.length
-    ? clientes.map(c => `
-        <div class="card">
-          <strong>${escapeHtml(c.nombre || "Cliente sin nombre")}</strong>
-          <div class="note">
-            ${c.empresa ? `🏢 ${escapeHtml(c.empresa)}<br>` : ""}
-            ${c.telefono ? `📞 ${escapeHtml(c.telefono)}<br>` : ""}
-            ${c.rtn ? `🧾 RTN: ${escapeHtml(c.rtn)}<br>` : ""}
-            ${c.ubicacion ? `📍 ${escapeHtml(c.ubicacion)}` : ""}
-          </div>
-        </div>
-      `).join("")
-    : `<div class="card"><strong>No hay clientes aún.</strong></div>`;
-
-  contenido.innerHTML = `
-    <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
-
-    <div class="card">
-      <strong>👤 Clientes</strong>
-      <div class="note">Se guardan localmente en este teléfono (no se borran al cerrar sesión).</div>
-    </div>
-
-    <input id="cNombre" placeholder="Nombre del cliente (opcional)">
-    <input id="cEmpresa" placeholder="Empresa (opcional)">
-    <input id="cTelefono" placeholder="Teléfono (opcional)">
-    <input id="cRTN" placeholder="RTN (opcional)">
-    <input id="cUbicacion" placeholder="Ubicación (opcional)">
-
-    <button type="button" onclick="guardarClientePantalla()">Guardar Cliente</button>
-    <hr>
-
-    ${rows}
-  `;
-}
-
-function guardarClientePantalla() {
-  const nombre = document.getElementById("cNombre").value || "";
-  const empresa = document.getElementById("cEmpresa").value || "";
-  const telefono = document.getElementById("cTelefono").value || "";
-  const rtn = document.getElementById("cRTN").value || "";
-  const ubicacion = document.getElementById("cUbicacion").value || "";
-
-  clientes.push({
-    id: makeId(),
-    nombre,
-    empresa,
-    telefono,
-    rtn,
-    ubicacion
-  });
-
-  localStorage.setItem("clientes", JSON.stringify(clientes));
-  abrirClientes();
-}
-
-/* ================= MODAL CLIENTES (selección en cotización) ================= */
-function abrirModalClientes() {
-  buscarClienteInput.value = "";
-  renderListaClientesModal();
-  modalClientes.classList.add("show");
-  setTimeout(() => buscarClienteInput.focus(), 50);
-}
-
-function cerrarModalClientes() {
-  modalClientes.classList.remove("show");
-}
-
-function renderListaClientesModal() {
-  if (!listaClientesModal) return;
-
-  const q = (buscarClienteInput.value || "").toLowerCase().trim();
-
-  const filtrados = clientes.filter(c => {
-    const nombre = (c.nombre || "").toLowerCase();
-    const empresa = (c.empresa || "").toLowerCase();
-    return nombre.includes(q) || empresa.includes(q);
-  });
-
-  if (!filtrados.length) {
-    listaClientesModal.innerHTML = `
-      <div class="card">
-        <strong>No hay coincidencias</strong>
-        <div class="note">Puedes crear un cliente nuevo.</div>
-      </div>
-    `;
-    return;
-  }
-
-  listaClientesModal.innerHTML = filtrados
-    .slice(0, 60)
-    .map(c => `
-      <div class="card" onclick="seleccionarClienteCotizacion(${c.id})">
-        <strong>${escapeHtml(c.nombre || "Cliente sin nombre")}</strong>
-        <div class="note">
-          ${c.empresa ? `🏢 ${escapeHtml(c.empresa)}<br>` : ""}
-          ${c.telefono ? `📞 ${escapeHtml(c.telefono)}` : ""}
-        </div>
-        <span class="badge">Seleccionar</span>
-      </div>
-    `)
-    .join("");
-}
-
-function seleccionarClienteCotizacion(id) {
-  if (!cotizacionActual) return;
-
-  cotizacionActual.clienteId = id;
-  cerrarModalClientes();
-  actualizarClienteSeleccionadoUI();
-}
-
-/* ================= MODAL NUEVO CLIENTE (desde cotización) ================= */
-function abrirModalNuevoCliente() {
-  // Limpia campos
-  ncNombre.value = "";
-  ncEmpresa.value = "";
-  ncTelefono.value = "";
-  ncRTN.value = "";
-  ncUbicacion.value = "";
-
-  // Cambiar modal
-  modalClientes.classList.remove("show");
-  modalNuevoCliente.classList.add("show");
-
-  setTimeout(() => ncNombre.focus(), 50);
-}
-
-function cerrarModalNuevoCliente(volverAClientes) {
-  modalNuevoCliente.classList.remove("show");
-  if (volverAClientes) {
-    // Volver al modal de clientes para seguir buscando/seleccionando
-    modalClientes.classList.add("show");
-    renderListaClientesModal();
-    setTimeout(() => buscarClienteInput.focus(), 50);
-  }
-}
-
-function guardarClienteDesdeModal() {
-  const nuevo = {
-    id: makeId(),
-    nombre: ncNombre.value || "",
-    empresa: ncEmpresa.value || "",
-    telefono: ncTelefono.value || "",
-    rtn: ncRTN.value || "",
-    ubicacion: ncUbicacion.value || "",
-  };
-
-  clientes.push(nuevo);
-  localStorage.setItem("clientes", JSON.stringify(clientes));
-
-  // Seleccionar automáticamente en la cotización
-  if (cotizacionActual) {
-    cotizacionActual.clienteId = nuevo.id;
-  }
-
-  // Cerrar modales y actualizar UI
-  modalNuevoCliente.classList.remove("show");
-  modalClientes.classList.remove("show");
-  actualizarClienteSeleccionadoUI();
-}
-
-/* ================= LOGO -> DataURL (para PDF) ================= */
-function blobToDataURL(blob) {
-  return new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(fr.result);
-    fr.onerror = reject;
-    fr.readAsDataURL(blob);
-  });
-}
-
-async function getLogoDataUrl() {
-  if (logoDataUrlCache) return logoDataUrlCache;
-  const res = await fetch(URLS.logo, { cache: "force-cache" });
-  const blob = await res.blob();
-  logoDataUrlCache = await blobToDataURL(blob);
-  return logoDataUrlCache;
-}
-
-/* ================= CATALOGO (INVENTARIO + PRECIOS) ================= */
-async function ensureCatalogoCargado() {
+/* ================= CATALOGO ================= */
+async function ensureCatalogoCargado(){
   if (catalogoCargado) return;
 
   const [invP, invA, precios] = await Promise.all([
     fetchJson(URLS.invP),
     fetchJson(URLS.invA),
-    fetchJson(URLS.precios)
+    fetchJson(URLS.precios),
   ]);
 
   catalogo = [];
@@ -499,139 +229,151 @@ async function ensureCatalogoCargado() {
     catalogoMap.set(codigo, obj);
   }
 
-  catalogo.sort((x, y) => (x.producto || "").localeCompare(y.producto || "", "es"));
+  catalogo.sort((x,y) => (x.producto||"").localeCompare(y.producto||"", "es"));
   catalogoCargado = true;
 }
 
-/* ================= COTIZACIONES ================= */
-function abrirCotizacion() {
+/* ================= CLIENTES (pantalla normal) ================= */
+function abrirClientes(){
   vendedorHome.classList.add("hidden");
   contenido.classList.remove("hidden");
 
   contenido.innerHTML = `
     <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
-    <div class="card"><strong>⏳ Cargando catálogo...</strong></div>
+
+    <div class="card">
+      <strong>👤 Clientes</strong>
+      <div class="muted">Se guardan en el teléfono (no se borran al salir).</div>
+    </div>
+
+    <input id="cNombre" placeholder="Nombre (opcional)" />
+    <input id="cEmpresa" placeholder="Empresa (opcional)" />
+    <input id="cTelefono" placeholder="Teléfono (opcional)" />
+    <input id="cRTN" placeholder="RTN (opcional)" />
+    <input id="cUbicacion" placeholder="Ubicación (opcional)" />
+
+    <button type="button" onclick="guardarClientePantalla()">Guardar cliente</button>
+
+    <hr />
+
+    ${clientes.length ? clientes.map(c => `
+      <div class="card">
+        <strong>${escapeHtml(c.nombre || "Cliente sin nombre")}</strong>
+        <div class="item-meta">
+          ${c.empresa ? `🏢 ${escapeHtml(c.empresa)}<br>` : ""}
+          ${c.telefono ? `📞 ${escapeHtml(c.telefono)}<br>` : ""}
+          ${c.rtn ? `🧾 RTN: ${escapeHtml(c.rtn)}<br>` : ""}
+          ${c.ubicacion ? `📍 ${escapeHtml(c.ubicacion)}` : ""}
+        </div>
+      </div>
+    `).join("") : `<div class="card"><strong>No hay clientes aún.</strong></div>`}
+  `;
+}
+
+function guardarClientePantalla(){
+  const nuevo = {
+    id: Date.now(),
+    nombre: el("cNombre").value || "",
+    empresa: el("cEmpresa").value || "",
+    telefono: el("cTelefono").value || "",
+    rtn: el("cRTN").value || "",
+    ubicacion: el("cUbicacion").value || ""
+  };
+
+  clientes.push(nuevo);
+  localStorage.setItem("clientes", JSON.stringify(clientes));
+  abrirClientes();
+}
+
+function volverHome(){
+  contenido.classList.add("hidden");
+  vendedorHome.classList.remove("hidden");
+}
+
+/* ================= COTIZACIONES UI ================= */
+function abrirCotizacion(){
+  vendedorHome.classList.add("hidden");
+  contenido.classList.remove("hidden");
+
+  contenido.innerHTML = `
+    <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
+    <div class="card"><strong>⏳ Cargando productos...</strong></div>
   `;
 
   ensureCatalogoCargado()
     .then(() => {
       cotizacionActual = {
-        id: makeId(),
+        id: Date.now(),
         fecha: nowStr(),
         clienteId: "",
-        defaultPriceType: "precio",
-        items: [] // {id,codigo,qty,priceType,customPrice}
+        items: [] // {id, codigo, qty, priceType, customPrice}
       };
-      renderCotizacionUI();
+      renderCotizacion();
     })
-    .catch(err => {
+    .catch((err) => {
       console.error(err);
       contenido.innerHTML = `
         <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
         <div class="card">
           <strong>❌ No se pudo cargar el catálogo.</strong>
-          <div class="note">Revisa tu internet. (Los datos vienen desde GitHub)</div>
+          <div class="muted">Revisa internet (los datos vienen desde GitHub).</div>
         </div>
       `;
     });
 }
 
-function renderCotizacionUI() {
-  if (!cotizacionActual) return;
+function getClienteSeleccionado(){
+  return clientes.find(c => String(c.id) === String(cotizacionActual?.clienteId)) || null;
+}
+
+function renderCotizacion(){
+  const cliente = getClienteSeleccionado();
 
   contenido.innerHTML = `
     <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
 
     <div class="card">
-      <strong>🧾 Nueva Cotización</strong>
-      <div class="note">
-        Fecha: <b>${escapeHtml(cotizacionActual.fecha)}</b><br>
-        Vendedor: <b>${escapeHtml(nombreVendedor || "No configurado")}</b>
-        <button type="button" class="inline secondary" onclick="abrirModalVendedor()" style="margin-left:8px;">Editar</button>
+      <strong>🧾 Cotización</strong>
+      <div class="item-meta">#${cotizacionActual.id} • ${escapeHtml(cotizacionActual.fecha)}</div>
+      <div style="margin-top:8px;">
+        <span class="badge">SOLO COTIZACIÓN • SIN VALIDEZ FISCAL</span>
       </div>
-      <span class="badge">SOLO COTIZACIÓN • SIN VALIDEZ</span>
     </div>
 
     <div class="card">
       <strong>👤 Cliente</strong>
-      <div id="cotClienteInfo" class="note"></div>
-      <button type="button" class="secondary" onclick="abrirModalClientes()">Seleccionar / Buscar cliente</button>
+      <div class="item-meta">
+        ${cliente
+          ? `${escapeHtml(cliente.nombre || "Cliente sin nombre")}<br>
+             ${cliente.empresa ? `🏢 ${escapeHtml(cliente.empresa)}<br>` : ""}
+             ${cliente.telefono ? `📞 ${escapeHtml(cliente.telefono)}<br>` : ""}
+             ${cliente.rtn ? `🧾 RTN: ${escapeHtml(cliente.rtn)}<br>` : ""}
+             ${cliente.ubicacion ? `📍 ${escapeHtml(cliente.ubicacion)}` : ""}`
+          : "Sin cliente seleccionado"
+        }
+      </div>
+      <button type="button" class="secondary" onclick="abrirModalClientes()">Seleccionar / Cambiar cliente</button>
     </div>
 
-    <div class="card">
-      <strong>💲 Precio por defecto al agregar</strong>
-      <div class="note">Cada producto puede usar un tipo diferente (mezclados).</div>
-      <select id="cotDefaultPrice"></select>
-    </div>
+    <button type="button" onclick="abrirModalProductos()">➕ Agregar producto</button>
 
-    <input id="cotBuscar" placeholder="🔍 Buscar producto por código o nombre" />
-    <div id="cotResultados"></div>
-
-    <hr>
-
-    <div class="card">
-      <strong>📦 Productos agregados</strong>
-      <div class="note">Puedes cambiar cantidad, tipo de precio o quitar.</div>
-    </div>
-
-    <div id="cotItems"></div>
+    <div id="cotItemsWrap"></div>
 
     <div class="total-box">
       <span>Total</span>
-      <span id="cotTotal">${moneyL(0)}</span>
+      <span id="cotTotal">${moneyL(calcularTotal())}</span>
     </div>
 
     <div style="height:10px"></div>
 
-    <button type="button" onclick="guardarCotizacion()">💾 Guardar Cotización</button>
+    <button type="button" onclick="guardarCotizacion()">💾 Guardar cotización</button>
     <button type="button" class="secondary" onclick="generarPdfCotizacion()">📄 Generar PDF</button>
   `;
 
-  // Cargar opciones precio por defecto
-  const sel = document.getElementById("cotDefaultPrice");
-  sel.innerHTML = PRICE_TYPES.map(t => `<option value="${t}">${PRICE_LABELS[t]}</option>`).join("");
-  sel.value = cotizacionActual.defaultPriceType;
-
-  sel.addEventListener("change", (e) => {
-    cotizacionActual.defaultPriceType = e.target.value;
-    renderCotResultados(); // para que muestre etiqueta/valor
-  });
-
-  // Buscar productos
-  const buscador = document.getElementById("cotBuscar");
-  buscador.addEventListener("input", () => renderCotResultados());
-
-  actualizarClienteSeleccionadoUI();
-  renderCotResultados();
-  renderCotItems();
+  renderItems();
 }
 
-function actualizarClienteSeleccionadoUI() {
-  const el = document.getElementById("cotClienteInfo");
-  if (!el || !cotizacionActual) return;
-
-  if (!cotizacionActual.clienteId) {
-    el.innerHTML = `Sin cliente seleccionado.`;
-    return;
-  }
-
-  const c = clientes.find(x => String(x.id) === String(cotizacionActual.clienteId));
-  if (!c) {
-    el.innerHTML = `Cliente no encontrado.`;
-    return;
-  }
-
-  const parts = [];
-  parts.push(`<b>${escapeHtml(c.nombre || "Cliente sin nombre")}</b>`);
-  if (c.empresa) parts.push(`🏢 ${escapeHtml(c.empresa)}`);
-  if (c.telefono) parts.push(`📞 ${escapeHtml(c.telefono)}`);
-  if (c.rtn) parts.push(`🧾 RTN: ${escapeHtml(c.rtn)}`);
-  if (c.ubicacion) parts.push(`📍 ${escapeHtml(c.ubicacion)}`);
-
-  el.innerHTML = parts.join("<br>");
-}
-
-function getUnitPrice(prod, item) {
+function getUnitPrice(prod, item){
   if (!prod) return 0;
 
   if (item.priceType === "precioVendedor") {
@@ -641,298 +383,379 @@ function getUnitPrice(prod, item) {
   const val = prod.precios?.[item.priceType];
   if (val !== undefined && val !== null) return Number(val || 0);
 
-  // fallback a precio público
-  const base = prod.precios?.precio;
-  return Number(base || 0);
+  // fallback
+  return Number(prod.precios?.precio || 0);
 }
 
-function renderCotResultados() {
-  const cont = document.getElementById("cotResultados");
-  const input = document.getElementById("cotBuscar");
-  if (!cont || !input) return;
+function itemKey(item){
+  const p = item.priceType || "precio";
+  const manual = (p === "precioVendedor") ? Number(item.customPrice || 0).toFixed(2) : "";
+  return `${item.codigo}__${p}__${manual}`;
+}
 
-  const q = (input.value || "").toLowerCase().trim();
+function normalizeItems(){
+  // combina SOLO si es exactamente el mismo producto + mismo tipo precio + mismo precio manual
+  const map = new Map();
+  const out = [];
+
+  for (const it of cotizacionActual.items) {
+    const key = itemKey(it);
+    if (!map.has(key)) {
+      map.set(key, { ...it });
+      out.push(map.get(key));
+    } else {
+      map.get(key).qty += Number(it.qty || 0);
+    }
+  }
+  cotizacionActual.items = out;
+}
+
+function calcularTotal(){
+  if (!cotizacionActual) return 0;
+  let total = 0;
+  for (const it of cotizacionActual.items) {
+    const prod = catalogoMap.get(it.codigo);
+    const unit = getUnitPrice(prod, it);
+    total += Number(it.qty || 0) * unit;
+  }
+  return total;
+}
+
+function renderItems(){
+  const wrap = el("cotItemsWrap");
+  if (!wrap) return;
+
+  if (!cotizacionActual.items.length) {
+    wrap.innerHTML = `<div class="card"><strong>No hay productos agregados.</strong></div>`;
+    return;
+  }
+
+  wrap.innerHTML = cotizacionActual.items.map(it => {
+    const prod = catalogoMap.get(it.codigo);
+    const unit = getUnitPrice(prod, it);
+    const sub = Number(it.qty || 0) * unit;
+
+    const options = PRICE_TYPES.map(t => {
+      const sel = it.priceType === t ? "selected" : "";
+      return `<option value="${t}" ${sel}>${PRICE_LABELS[t]}</option>`;
+    }).join("");
+
+    const manualInput = it.priceType === "precioVendedor"
+      ? `<input class="qty" type="number" step="0.01" min="0"
+           value="${Number(it.customPrice || 0)}"
+           onchange="setItemCustomPrice('${it.id}', this.value)" />`
+      : "";
+
+    return `
+      <div class="item-row">
+        <div class="item-top">
+          <div>
+            <div class="item-name">${escapeHtml(prod?.producto || it.codigo)}</div>
+            <div class="item-meta">
+              Código: ${escapeHtml(it.codigo)} • Stock: ${prod?.stockTotal ?? "?"}<br>
+              Tipo: <b>${PRICE_LABELS[it.priceType]}</b> • P.Unit: <b>${moneyL(unit)}</b>
+            </div>
+          </div>
+          <div style="font-weight:900">${moneyL(sub)}</div>
+        </div>
+
+        <div class="item-controls">
+          <button type="button" class="inline secondary" onclick="decQty('${it.id}')">-</button>
+          <input class="qty" type="number" min="1" value="${Number(it.qty || 1)}"
+                 onchange="setQty('${it.id}', this.value)" />
+          <button type="button" class="inline secondary" onclick="incQty('${it.id}')">+</button>
+
+          <select class="inline" onchange="setPriceType('${it.id}', this.value)">
+            ${options}
+          </select>
+
+          ${manualInput}
+
+          <button type="button" class="inline danger" onclick="removeItem('${it.id}')">✖</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  const totalEl = el("cotTotal");
+  if (totalEl) totalEl.textContent = moneyL(calcularTotal());
+}
+
+function findItemById(id){
+  return cotizacionActual.items.find(x => String(x.id) === String(id));
+}
+
+function incQty(id){
+  const it = findItemById(id);
+  if (!it) return;
+  it.qty = Number(it.qty || 1) + 1;
+  renderItems();
+}
+
+function decQty(id){
+  const it = findItemById(id);
+  if (!it) return;
+  it.qty = Math.max(1, Number(it.qty || 1) - 1);
+  renderItems();
+}
+
+function setQty(id, val){
+  const it = findItemById(id);
+  if (!it) return;
+  it.qty = Math.max(1, Number(val || 1));
+  renderItems();
+}
+
+function setPriceType(id, type){
+  const it = findItemById(id);
+  if (!it) return;
+  it.priceType = type;
+  if (type !== "precioVendedor") {
+    it.customPrice = 0;
+  } else {
+    if (it.customPrice === undefined || it.customPrice === null) it.customPrice = 0;
+  }
+
+  normalizeItems(); // mantiene regla de líneas separadas por precio
+  renderCotizacion();
+}
+
+function setItemCustomPrice(id, val){
+  const it = findItemById(id);
+  if (!it) return;
+  it.customPrice = Number(val || 0);
+
+  normalizeItems(); // si mismo manual price, combina
+  renderCotizacion();
+}
+
+function removeItem(id){
+  cotizacionActual.items = cotizacionActual.items.filter(x => String(x.id) !== String(id));
+  renderCotizacion();
+}
+
+/* ================= MODAL CLIENTES (cotización) ================= */
+function abrirModalClientes(){
+  el("buscarClienteModal").value = "";
+  renderClientesModal();
+  openModal("modalClientes");
+  setTimeout(() => el("buscarClienteModal").focus(), 50);
+}
+
+function cerrarModalClientes(){
+  closeModal("modalClientes");
+}
+
+function renderClientesModal(){
+  const q = (el("buscarClienteModal").value || "").toLowerCase().trim();
+  const cont = el("listaClientesModal");
+
+  const filtrados = clientes.filter(c => {
+    const nombre = (c.nombre || "").toLowerCase();
+    const empresa = (c.empresa || "").toLowerCase();
+    return nombre.includes(q) || empresa.includes(q);
+  });
+
+  cont.innerHTML = filtrados.length ? filtrados.map(c => `
+    <div class="list-item" onclick="seleccionarClienteCot('${c.id}')">
+      <div class="list-title">${escapeHtml(c.nombre || "Cliente sin nombre")}</div>
+      <div class="list-sub">${c.empresa ? "🏢 " + escapeHtml(c.empresa) : ""} ${c.telefono ? " • 📞 " + escapeHtml(c.telefono) : ""}</div>
+    </div>
+  `).join("") : `<div class="list-item"><div class="list-title">No hay coincidencias</div></div>`;
+}
+
+el("buscarClienteModal")?.addEventListener("input", renderClientesModal);
+
+function seleccionarClienteCot(id){
+  cotizacionActual.clienteId = id;
+  cerrarModalClientes();
+  renderCotizacion();
+}
+
+function abrirModalNuevoClienteDesdeCot(){
+  cerrarModalClientes();
+
+  el("ncNombre").value = "";
+  el("ncEmpresa").value = "";
+  el("ncTelefono").value = "";
+  el("ncRTN").value = "";
+  el("ncUbicacion").value = "";
+
+  openModal("modalNuevoCliente");
+  setTimeout(() => el("ncNombre").focus(), 50);
+}
+
+function cerrarModalNuevoCliente(){
+  closeModal("modalNuevoCliente");
+}
+
+function guardarNuevoClienteModal(){
+  const nuevo = {
+    id: Date.now(),
+    nombre: el("ncNombre").value || "",
+    empresa: el("ncEmpresa").value || "",
+    telefono: el("ncTelefono").value || "",
+    rtn: el("ncRTN").value || "",
+    ubicacion: el("ncUbicacion").value || ""
+  };
+
+  clientes.push(nuevo);
+  localStorage.setItem("clientes", JSON.stringify(clientes));
+
+  // ✅ seleccionar automáticamente en cotización
+  cotizacionActual.clienteId = nuevo.id;
+
+  cerrarModalNuevoCliente();
+  renderCotizacion();
+}
+
+/* ================= MODAL PRODUCTOS + MODAL AGREGAR PRODUCTO ================= */
+function abrirModalProductos(){
+  // mostrar modal de búsqueda
+  el("buscarProductoModal").value = "";
+  renderProductosModal();
+  openModal("modalProductos");
+  setTimeout(() => el("buscarProductoModal").focus(), 50);
+}
+
+function cerrarModalProductos(){
+  closeModal("modalProductos");
+}
+
+function renderProductosModal(){
+  const q = (el("buscarProductoModal").value || "").toLowerCase().trim();
+  const cont = el("listaProductosModal");
+
   if (!q) {
-    cont.innerHTML = `<div class="card"><strong>Escribe para buscar productos…</strong></div>`;
+    cont.innerHTML = `<div class="list-item"><div class="list-title">Escribe para buscar productos…</div><div class="list-sub">Ej: “clavo”, “01-0002”</div></div>`;
     return;
   }
 
   const encontrados = catalogo.filter(p =>
     (p.codigo || "").toLowerCase().includes(q) ||
     (p.producto || "").toLowerCase().includes(q)
-  ).slice(0, 25);
+  ).slice(0, 30);
 
-  if (!encontrados.length) {
-    cont.innerHTML = `<div class="card"><strong>No se encontraron productos.</strong></div>`;
-    return;
-  }
-
-  const dummyItem = { priceType: cotizacionActual.defaultPriceType, customPrice: 0 };
-
-  cont.innerHTML = encontrados.map(p => {
-    const precio = (dummyItem.priceType === "precioVendedor")
-      ? 0
-      : getUnitPrice(p, dummyItem);
-
-    const etiqueta = PRICE_LABELS[dummyItem.priceType];
-    const precioTxt = dummyItem.priceType === "precioVendedor" ? "Manual" : moneyL(precio);
-
-    return `
-      <div class="card">
-        <strong>${escapeHtml(trunc(p.producto, 60))}</strong>
-        <div class="note">Código: <b>${escapeHtml(p.codigo)}</b> • Stock: <b>${p.stockTotal}</b></div>
-        <span class="badge">${escapeHtml(etiqueta)} • ${escapeHtml(precioTxt)}</span>
-        <div style="height:8px"></div>
-        <button type="button" class="inline" onclick="abrirModalProducto('${escapeHtml(p.codigo)}')">➕ Seleccionar</button>
-      </div>
-    `;
-  }).join("");
+  cont.innerHTML = encontrados.length ? encontrados.map(p => `
+    <div class="list-item" onclick="abrirModalAgregarProducto('${p.codigo}')">
+      <div class="list-title">${escapeHtml(p.producto)}</div>
+      <div class="list-sub">Código: ${escapeHtml(p.codigo)} • Stock: ${p.stockTotal}</div>
+    </div>
+  `).join("") : `<div class="list-item"><div class="list-title">No hay resultados</div></div>`;
 }
 
-/* ================= MODAL PRODUCTO (cantidad + tipo + precios) ================= */
-function abrirModalProducto(codigo) {
+el("buscarProductoModal")?.addEventListener("input", renderProductosModal);
+
+function abrirModalAgregarProducto(codigo){
   const prod = catalogoMap.get(codigo);
   if (!prod) return;
 
-  productoModal = prod;
+  // cerramos modal de búsqueda y abrimos modal de agregar
+  cerrarModalProductos();
 
-  mpNombre.textContent = prod.producto || "Producto";
-  mpMeta.innerHTML = `Código: <b>${escapeHtml(prod.codigo)}</b> • Stock total: <b>${prod.stockTotal}</b>`;
+  selectedProductCode = codigo;
 
-  // Render tabla de precios
-  const rows = PRICE_TYPES.map(t => {
-    const label = PRICE_LABELS[t];
-    const val = (t === "precioVendedor") ? "Manual" : moneyL(Number(prod.precios?.[t] || 0));
-    return `<div class="price-row"><span>${escapeHtml(label)}</span><b>${escapeHtml(val)}</b></div>`;
+  el("apTitulo").textContent = prod.producto;
+  el("apSub").textContent = `Código: ${prod.codigo} • Stock: ${prod.stockTotal}`;
+
+  // lista de precios (mostrar todos)
+  const preciosHtml = PRICE_TYPES
+    .filter(t => t !== "precioVendedor")
+    .map(t => {
+      const v = prod.precios?.[t];
+      const val = (v === undefined || v === null) ? "N/D" : moneyL(v);
+      return `<div class="k">${PRICE_LABELS[t]}</div><div class="v">${val}</div>`;
+    }).join("");
+
+  el("apListaPrecios").innerHTML = preciosHtml + `
+    <div class="k">${PRICE_LABELS.precioVendedor}</div><div class="v">Manual</div>
+  `;
+
+  el("apCantidad").value = 1;
+
+  // llenar select tipo precio con label + valor
+  el("apTipoPrecio").innerHTML = PRICE_TYPES.map(t => {
+    if (t === "precioVendedor") {
+      return `<option value="${t}">${PRICE_LABELS[t]} (manual)</option>`;
+    }
+    const v = prod.precios?.[t];
+    const val = (v === undefined || v === null) ? "N/D" : moneyL(v);
+    return `<option value="${t}">${PRICE_LABELS[t]} • ${val}</option>`;
   }).join("");
-  mpListaPrecios.innerHTML = rows;
 
-  // Select de tipo precio
-  mpTipoPrecio.innerHTML = PRICE_TYPES.map(t => {
-    const val = (t === "precioVendedor") ? "Manual" : moneyL(Number(prod.precios?.[t] || 0));
-    return `<option value="${t}">${escapeHtml(PRICE_LABELS[t])} • ${escapeHtml(val)}</option>`;
-  }).join("");
+  el("apTipoPrecio").value = "precio";
+  el("apPrecioManualWrap").classList.add("hidden");
+  el("apPrecioManual").value = "";
 
-  mpCantidad.value = 1;
-  mpTipoPrecio.value = cotizacionActual?.defaultPriceType || "precio";
-
-  // Precio manual default
-  mpPrecioValor.value = "";
-
-  togglePrecioManual();
-  actualizarProductoModalTotal();
-
-  modalProducto.classList.add("show");
+  openModal("modalAgregarProducto");
 }
 
-function cerrarModalProducto() {
-  modalProducto.classList.remove("show");
-  productoModal = null;
+function cerrarModalAgregarProducto(){
+  closeModal("modalAgregarProducto");
+  selectedProductCode = null;
 }
 
-function togglePrecioManual() {
-  if (!mpPrecioManualWrap) return;
-  const t = mpTipoPrecio.value;
-  if (t === "precioVendedor") {
-    mpPrecioManualWrap.classList.remove("hidden");
+el("apTipoPrecio")?.addEventListener("change", () => {
+  const type = el("apTipoPrecio").value;
+  if (type === "precioVendedor") {
+    el("apPrecioManualWrap").classList.remove("hidden");
+    setTimeout(() => el("apPrecioManual").focus(), 50);
   } else {
-    mpPrecioManualWrap.classList.add("hidden");
+    el("apPrecioManualWrap").classList.add("hidden");
   }
-}
+});
 
-function actualizarProductoModalTotal() {
-  if (!productoModal) return;
+function confirmarAgregarProducto(){
+  const prod = catalogoMap.get(selectedProductCode);
+  if (!prod) return;
 
-  const qty = Math.max(1, Number(mpCantidad.value || 1));
-  const t = mpTipoPrecio.value;
-
-  let unit = 0;
-  if (t === "precioVendedor") {
-    unit = Number(mpPrecioValor.value || 0);
-  } else {
-    unit = Number(productoModal.precios?.[t] || 0);
-  }
-
-  const totalLinea = qty * unit;
-  mpTotalLinea.textContent = moneyL(totalLinea);
-}
-
-function confirmarAgregarProducto() {
-  if (!cotizacionActual || !productoModal) return;
-
-  const qty = Math.max(1, Number(mpCantidad.value || 1));
-  const priceType = mpTipoPrecio.value;
+  const qty = Math.max(1, Number(el("apCantidad").value || 1));
+  const priceType = el("apTipoPrecio").value;
   let customPrice = 0;
 
   if (priceType === "precioVendedor") {
-    customPrice = Number(mpPrecioValor.value || 0);
+    customPrice = Number(el("apPrecioManual").value || 0);
     if (customPrice <= 0) {
-      const ok = confirm("El PRECIO VENDEDOR está en 0. ¿Deseas agregar así?");
-      if (!ok) return;
+      alert("Ingresa un PRECIO VENDEDOR válido.");
+      return;
     }
   }
 
-  cotAgregarLinea(productoModal.codigo, qty, priceType, customPrice);
+  addItem(prod.codigo, qty, priceType, customPrice);
 
-  cerrarModalProducto();
-  renderCotItems();
+  cerrarModalAgregarProducto();
+  renderCotizacion();
 }
 
-/* ================= ITEMS (permiten precios mezclados) ================= */
-function cotAgregarLinea(codigo, qty, priceType, customPrice) {
-  // Si ya existe MISMO producto y MISMO tipo (y mismo custom si aplica), sumamos cantidad
-  const match = cotizacionActual.items.find(it => {
-    if (it.codigo !== codigo) return false;
-    if (it.priceType !== priceType) return false;
-    if (priceType === "precioVendedor") {
-      return Number(it.customPrice || 0) === Number(customPrice || 0);
-    }
-    return true;
-  });
+function addItem(codigo, qty, priceType, customPrice){
+  // ✅ regla: mismo producto con distinto precio => líneas separadas
+  // aquí solo combinamos si es mismo codigo + mismo priceType + mismo precio manual (si aplica)
+  const newItem = {
+    id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
+    codigo,
+    qty: Number(qty || 1),
+    priceType,
+    customPrice: Number(customPrice || 0)
+  };
 
-  if (match) {
-    match.qty += qty;
+  const key = itemKey(newItem);
+  const exist = cotizacionActual.items.find(it => itemKey(it) === key);
+
+  if (exist) {
+    exist.qty += newItem.qty;
   } else {
-    cotizacionActual.items.push({
-      id: makeId(),
-      codigo,
-      qty,
-      priceType,
-      customPrice: priceType === "precioVendedor" ? Number(customPrice || 0) : 0
-    });
+    cotizacionActual.items.push(newItem);
   }
 }
 
-function cotFindItem(itemId) {
-  return cotizacionActual.items.find(x => String(x.id) === String(itemId));
-}
-
-function cotInc(itemId) {
-  const it = cotFindItem(itemId);
-  if (!it) return;
-  it.qty += 1;
-  renderCotItems();
-}
-
-function cotDec(itemId) {
-  const it = cotFindItem(itemId);
-  if (!it) return;
-  it.qty = Math.max(1, it.qty - 1);
-  renderCotItems();
-}
-
-function cotSetQty(itemId, val) {
-  const it = cotFindItem(itemId);
-  if (!it) return;
-  it.qty = Math.max(1, Number(val || 1));
-  renderCotItems();
-}
-
-function cotSetPriceType(itemId, newType) {
-  const it = cotFindItem(itemId);
-  if (!it) return;
-
-  it.priceType = newType;
-
-  if (newType === "precioVendedor") {
-    // poner precio manual por defecto: el precio público del producto (si existe)
-    const prod = catalogoMap.get(it.codigo);
-    const fallback = Number(prod?.precios?.precio || 0);
-    it.customPrice = Number(it.customPrice || fallback || 0);
-  } else {
-    it.customPrice = 0;
-  }
-
-  renderCotItems();
-}
-
-function cotSetCustomPrice(itemId, val) {
-  const it = cotFindItem(itemId);
-  if (!it) return;
-  it.customPrice = Number(val || 0);
-  renderCotItems();
-}
-
-function cotQuitar(itemId) {
-  cotizacionActual.items = cotizacionActual.items.filter(x => String(x.id) !== String(itemId));
-  renderCotItems();
-}
-
-function renderCotItems() {
-  const cont = document.getElementById("cotItems");
-  const totalEl = document.getElementById("cotTotal");
-  if (!cont || !totalEl || !cotizacionActual) return;
-
-  if (!cotizacionActual.items.length) {
-    cont.innerHTML = `<div class="card"><strong>No hay productos agregados.</strong></div>`;
-    totalEl.textContent = moneyL(0);
-    return;
-  }
-
-  let total = 0;
-
-  cont.innerHTML = cotizacionActual.items.map(it => {
-    const prod = catalogoMap.get(it.codigo);
-    const unit = getUnitPrice(prod, it);
-    const qty = Number(it.qty || 0);
-    const sub = qty * unit;
-    total += sub;
-
-    const priceOptions = PRICE_TYPES.map(t => {
-      const sel = (it.priceType === t) ? "selected" : "";
-      return `<option value="${t}" ${sel}>${escapeHtml(PRICE_LABELS[t])}</option>`;
-    }).join("");
-
-    const customInput = it.priceType === "precioVendedor"
-      ? `<input class="qty" type="number" step="0.01" min="0" value="${Number(it.customPrice || 0)}"
-           onchange="cotSetCustomPrice(${it.id}, this.value)" />`
-      : "";
-
-    return `
-      <div class="item-row">
-        <div class="top">
-          <div>
-            <div class="name">${escapeHtml(trunc(prod?.producto || it.codigo, 60))}</div>
-            <div class="meta">
-              Código: ${escapeHtml(it.codigo)} • Stock: ${prod ? prod.stockTotal : "?"}
-            </div>
-          </div>
-          <div style="font-weight:900;">${moneyL(sub)}</div>
-        </div>
-
-        <div class="controls">
-          <button type="button" class="inline secondary" onclick="cotDec(${it.id})">-</button>
-          <input class="qty" type="number" min="1" value="${qty}" onchange="cotSetQty(${it.id}, this.value)" />
-          <button type="button" class="inline secondary" onclick="cotInc(${it.id})">+</button>
-
-          <select class="inline" onchange="cotSetPriceType(${it.id}, this.value)">
-            ${priceOptions}
-          </select>
-
-          ${customInput}
-
-          <button type="button" class="inline danger" onclick="cotQuitar(${it.id})">✖</button>
-        </div>
-
-        <div class="meta">
-          Tipo: <b>${escapeHtml(PRICE_LABELS[it.priceType])}</b> • P.Unit: <b>${moneyL(unit)}</b>
-        </div>
-      </div>
-    `;
-  }).join("");
-
-  totalEl.textContent = moneyL(total);
-}
-
-/* ================= SNAPSHOT (guardar / PDF) ================= */
-function buildCotizacionSnapshot() {
-  const cliente = clientes.find(c => String(c.id) === String(cotizacionActual.clienteId)) || null;
+/* ================= GUARDAR COTIZACIÓN ================= */
+function buildCotizacionSnapshot(){
+  const cliente = getClienteSeleccionado();
 
   const items = cotizacionActual.items.map(it => {
     const prod = catalogoMap.get(it.codigo);
     const unit = getUnitPrice(prod, it);
     const qty = Number(it.qty || 0);
-
     return {
       codigo: it.codigo,
       producto: prod?.producto || "",
@@ -952,237 +775,269 @@ function buildCotizacionSnapshot() {
     vendedor: nombreVendedor || "",
     cliente: cliente ? {
       nombre: cliente.nombre || "",
-      rtn: cliente.rtn || "",
-      ubicacion: cliente.ubicacion || "",
+      empresa: cliente.empresa || "",
       telefono: cliente.telefono || "",
-      empresa: cliente.empresa || ""
+      rtn: cliente.rtn || "",
+      ubicacion: cliente.ubicacion || ""
     } : null,
     items,
     total,
-    disclaimer: "ESTE DOCUMENTO ES SOLO UNA COTIZACIÓN Y NO TIENE NINGUNA VALIDEZ / VALIDEZ FISCAL"
+    disclaimer: "ESTE DOCUMENTO ES SOLO UNA COTIZACIÓN Y NO TIENE VALIDEZ FISCAL"
   };
 }
 
-/* ================= GUARDAR COTIZACIÓN ================= */
-function guardarCotizacion(skipNameCheck = false) {
+function guardarCotizacion(skipNameCheck = false){
   if (!skipNameCheck) {
-    if (!ensureNombreVendedor({ type: "cot_guardar" })) return;
+    if (!ensureNombreVendedor({ type: "guardar" })) return;
   }
 
-  if (!cotizacionActual?.items?.length) {
-    alert("Agrega al menos un producto a la cotización.");
+  if (!cotizacionActual.items.length) {
+    alert("Agrega al menos un producto.");
     return;
-  }
-
-  // Validar precio vendedor (si aplica)
-  const badManual = cotizacionActual.items.some(it => it.priceType === "precioVendedor" && Number(it.customPrice || 0) <= 0);
-  if (badManual) {
-    const ok = confirm("Hay productos con PRECIO VENDEDOR en 0. ¿Deseas guardar así?");
-    if (!ok) return;
   }
 
   const snap = buildCotizacionSnapshot();
   cotizaciones.unshift(snap);
   localStorage.setItem("cotizaciones", JSON.stringify(cotizaciones));
-
   alert("✅ Cotización guardada localmente.");
 }
 
-/* ================= PDF: Generar + Compartir/Descargar ================= */
-function generarPdfCotizacion(skipNameCheck = false) {
-  if (!skipNameCheck) {
-    if (!ensureNombreVendedor({ type: "cot_pdf" })) return;
-  }
-
-  if (!cotizacionActual?.items?.length) {
-    alert("Agrega productos primero.");
-    return;
-  }
-
-  const snap = buildCotizacionSnapshot();
-  crearPdfCotizacion(snap, () => renderCotizacionUI());
+/* ================= PDF ================= */
+function blobToDataURL(blob){
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = reject;
+    fr.readAsDataURL(blob);
+  });
 }
 
-function estimateHeightMM(cot) {
-  // Ticket 80mm: base aproximada
-  let h = 110; // encabezado + cliente
-  h += cot.cliente ? 14 : 8;
-
-  cot.items.forEach(it => {
-    const nameLen = (it.producto || "").length;
-    const lines = Math.max(1, Math.ceil(nameLen / 28));
-    h += 10 + (lines * 4.2) + 6; // bloque item
-  });
-
-  h += 30; // total + disclaimer
-  return Math.max(170, Math.ceil(h));
+async function getLogoDataUrl(){
+  if (logoDataUrlCache) return logoDataUrlCache;
+  const res = await fetch(URLS.logo, { cache: "force-cache" });
+  const blob = await res.blob();
+  logoDataUrlCache = await blobToDataURL(blob);
+  return logoDataUrlCache;
 }
 
-async function crearPdfCotizacion(cot, backFn) {
-  const { jsPDF, GState } = window.jspdf || {};
-  if (!jsPDF) {
-    alert("No se encontró jsPDF. Revisa la conexión o el script en index.html.");
-    return;
-  }
-
-  const height = estimateHeightMM(cot);
-  const doc = new jsPDF({
-    orientation: "portrait",
-    unit: "mm",
-    format: [80, height]
-  });
-
-  const left = 4;
-  const right = 76;
-  let y = 6;
-
-  // Logo
-  try {
-    const logoDataUrl = await getLogoDataUrl();
-    doc.addImage(logoDataUrl, "PNG", 17, y, 46, 18);
-  } catch (e) {
-    // si falla, seguimos sin logo
-  }
-
-  y += 24;
-
-  // Encabezado
-  doc.setTextColor(36, 58, 143);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
-  doc.text("FERRETERÍA UNIVERSAL", 40, y, { align: "center" });
-
-  y += 6;
-  doc.setTextColor(31, 41, 55);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.text(`COTIZACIÓN #${cot.id}`, 40, y, { align: "center" });
-
-  y += 5;
-  doc.text(`Fecha: ${cot.fecha}`, left, y);
-  y += 4.5;
-  doc.text(`Vendedor: ${cot.vendedor}`, left, y);
-
-  y += 4.5;
-  doc.setDrawColor(229, 231, 235);
-  doc.line(left, y, right, y);
-
-  // Marca de agua
-  y += 7;
-  try { if (GState) doc.setGState(new GState({ opacity: 0.12 })); } catch {}
-  doc.setTextColor(156, 163, 175);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.text("SOLO COTIZACIÓN", 40, y + 18, { align: "center", angle: 45 });
-  try { if (GState) doc.setGState(new GState({ opacity: 1 })); } catch {}
-
-  // Cliente
-  doc.setTextColor(31, 41, 55);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-
-  let clienteLines = [];
-  if (cot.cliente) {
-    const nombre = cot.cliente.nombre || "SIN NOMBRE";
-    clienteLines.push(`Cliente: ${nombre}`);
-    if (cot.cliente.empresa) clienteLines.push(`Empresa: ${cot.cliente.empresa}`);
-    if (cot.cliente.telefono) clienteLines.push(`Tel: ${cot.cliente.telefono}`);
-    if (cot.cliente.rtn) clienteLines.push(`RTN: ${cot.cliente.rtn}`);
-  } else {
-    clienteLines.push("Cliente: SIN CLIENTE");
-  }
-
-  y += 6;
-  clienteLines.forEach(line => {
-    const lines = doc.splitTextToSize(line, 72);
-    doc.text(lines, left, y);
-    y += lines.length * 4.2;
-  });
-
-  y += 1;
-  doc.line(left, y, right, y);
-
-  // Detalle
-  y += 6;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  doc.text("DETALLE", left, y);
-
-  y += 5;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-
-  cot.items.forEach((it) => {
-    doc.setFont("helvetica", "bold");
-    doc.text(`${it.cantidad} x ${it.codigo}`, left, y);
-    y += 4.2;
-
-    doc.setFont("helvetica", "normal");
-    const nameLines = doc.splitTextToSize(it.producto || "", 72);
-    doc.text(nameLines, left, y);
-    y += nameLines.length * 4.2;
-
-    doc.setTextColor(107, 114, 128);
-    doc.text(`Tipo: ${it.tipoPrecioLabel}`, left, y);
-    y += 4.2;
-
-    doc.setTextColor(31, 41, 55);
-    doc.text(`P.Unit: ${moneyL(it.precioUnitario)}`, left, y);
-    doc.text(`Subt: ${moneyL(it.subtotal)}`, right, y, { align: "right" });
-    y += 5;
-
-    doc.setDrawColor(229, 231, 235);
-    doc.line(left, y, right, y);
-    y += 4;
-  });
-
-  // Total
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.setTextColor(36, 58, 143);
-  doc.text(`TOTAL: ${moneyL(cot.total)}`, right, y, { align: "right" });
-
-  y += 8;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.setTextColor(107, 114, 128);
-  const discLines = doc.splitTextToSize(cot.disclaimer, 72);
-  doc.text(discLines, 40, y, { align: "center" });
-
-  // Generar blob y mostrar
-  const blob = doc.output("blob");
-  setLastFile(blob, `cotizacion-${cot.id}.pdf`, "application/pdf",
-    "Cotización - Ferretería Universal",
-    "Documento solo para cotización, sin validez");
-
-  mostrarPdfEnPantalla(backFn);
-}
-
-function setLastFile(blob, filename, mime, title, text) {
+function setLastFile(blob, filename, title, text){
   if (lastFile.url) URL.revokeObjectURL(lastFile.url);
-
   lastFile.blob = blob;
   lastFile.url = URL.createObjectURL(blob);
   lastFile.filename = filename;
-  lastFile.mime = mime;
+  lastFile.mime = "application/pdf";
   lastFile.title = title || "";
   lastFile.text = text || "";
 }
 
-function mostrarPdfEnPantalla(backFn) {
-  // Guardamos callback en window para usarlo desde HTML inline
-  window.__backFromPdf = typeof backFn === "function" ? backFn : volverHome;
+function generarPdfCotizacion(skipNameCheck = false){
+  if (!skipNameCheck) {
+    if (!ensureNombreVendedor({ type: "pdf" })) return;
+  }
 
+  if (!cotizacionActual.items.length) {
+    alert("Agrega productos primero.");
+    return;
+  }
+
+  const cot = buildCotizacionSnapshot();
+  crearPdfCotizacion(cot);
+}
+
+async function crearPdfCotizacion(cot){
+  const pkg = window.jspdf || {};
+  const jsPDF = pkg.jsPDF;
+  const GState = pkg.GState;
+
+  if (!jsPDF) {
+    alert("No se encontró jsPDF. Revisa el script en index.html.");
+    return;
+  }
+
+  // ✅ Ticket 80mm, páginas 80x297mm con saltos
+  const PAGE_W = 80;
+  const PAGE_H = 297;
+  const marginL = 4;
+  const marginR = PAGE_W - 4;
+  const lineH = 4.2;
+  const bottomReserve = 24; // espacio para total + texto legal
+
+  const doc = new jsPDF({ unit: "mm", format: [PAGE_W, PAGE_H] });
+
+  const logoDataUrl = await getLogoDataUrl().catch(() => null);
+
+  let y = 6;
+  let page = 1;
+
+  function watermark(){
+    // Marca de agua en cada página
+    doc.setTextColor(180, 180, 180);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+
+    try {
+      if (GState) doc.setGState(new GState({ opacity: 0.12 }));
+    } catch {}
+
+    doc.text("SOLO COTIZACIÓN", 40, 140, { align: "center", angle: 45 });
+
+    try {
+      if (GState) doc.setGState(new GState({ opacity: 1 }));
+    } catch {}
+
+    doc.setTextColor(31, 41, 55);
+  }
+
+  function header(isFirst){
+    watermark();
+
+    if (isFirst && logoDataUrl) {
+      doc.addImage(logoDataUrl, "PNG", 17, y, 46, 18);
+      y += 22;
+    }
+
+    doc.setTextColor(36, 58, 143);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("FERRETERÍA UNIVERSAL", 40, y, { align: "center" });
+    y += 6;
+
+    doc.setTextColor(31, 41, 55);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(`COTIZACIÓN #${cot.id}${!isFirst ? " (CONT.)" : ""}`, 40, y, { align: "center" });
+    y += 5;
+
+    doc.text(`Fecha: ${cot.fecha}`, marginL, y); y += 4.5;
+    doc.text(`Vendedor: ${cot.vendedor}`, marginL, y); y += 4.5;
+
+    doc.setDrawColor(229, 231, 235);
+    doc.line(marginL, y, marginR, y);
+    y += 6;
+  }
+
+  function newPage(){
+    doc.addPage([PAGE_W, PAGE_H]);
+    page += 1;
+    y = 6;
+    header(false);
+  }
+
+  function ensureSpace(mmNeeded){
+    if (y + mmNeeded > PAGE_H - bottomReserve) {
+      newPage();
+    }
+  }
+
+  header(true);
+
+  // Cliente en líneas separadas (factura real)
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(36, 58, 143);
+  doc.text("DATOS DEL CLIENTE", marginL, y);
+  y += 5;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(31, 41, 55);
+
+  const c = cot.cliente || {};
+  const clienteLines = [
+    `Nombre: ${c.nombre || "—"}`,
+    `Empresa: ${c.empresa || "—"}`,
+    `Teléfono: ${c.telefono || "—"}`,
+    `RTN: ${c.rtn || "—"}`,
+    `Ubicación: ${c.ubicacion || "—"}`
+  ];
+
+  ensureSpace(clienteLines.length * lineH + 6);
+
+  clienteLines.forEach(line => {
+    doc.text(line, marginL, y);
+    y += lineH;
+  });
+
+  y += 2;
+  doc.setDrawColor(229, 231, 235);
+  doc.line(marginL, y, marginR, y);
+  y += 6;
+
+  // Detalle
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(36, 58, 143);
+  doc.text("DETALLE", marginL, y);
+  y += 6;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(31, 41, 55);
+
+  for (const it of cot.items) {
+    const name = it.producto || "";
+    const nameLines = doc.splitTextToSize(name, 72);
+
+    // Estimar espacio por item:
+    // 1 línea qty/cod + nameLines + 1 línea tipo + 1 línea precios + separador
+    const mmNeeded = (1 + nameLines.length + 1 + 1) * lineH + 6;
+    ensureSpace(mmNeeded);
+
+    doc.setFont("helvetica", "bold");
+    doc.text(`${it.cantidad} x ${it.codigo}`, marginL, y);
+    doc.text(`${moneyL(it.subtotal)}`, marginR, y, { align: "right" });
+    y += lineH;
+
+    doc.setFont("helvetica", "normal");
+    doc.text(nameLines, marginL, y);
+    y += nameLines.length * lineH;
+
+    doc.setTextColor(107, 114, 128);
+    doc.text(`Tipo: ${it.tipoPrecioLabel}`, marginL, y);
+    y += lineH;
+
+    doc.setTextColor(31, 41, 55);
+    doc.text(`P.Unit: ${moneyL(it.precioUnitario)}`, marginL, y);
+    doc.text(`Subt: ${moneyL(it.subtotal)}`, marginR, y, { align: "right" });
+    y += lineH + 2;
+
+    doc.setDrawColor(229, 231, 235);
+    doc.line(marginL, y, marginR, y);
+    y += 5;
+  }
+
+  // Total SIEMPRE visible (con salto si hace falta)
+  ensureSpace(18);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(36, 58, 143);
+  doc.text(`TOTAL: ${moneyL(cot.total)}`, marginR, y, { align: "right" });
+  y += 8;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(107, 114, 128);
+  const legalLines = doc.splitTextToSize(cot.disclaimer, 72);
+  doc.text(legalLines, 40, y, { align: "center" });
+
+  const blob = doc.output("blob");
+  setLastFile(blob, `cotizacion-${cot.id}.pdf`, "Cotización - Ferretería Universal", "Cotización (sin validez fiscal)");
+
+  mostrarPdfPreview();
+}
+
+function mostrarPdfPreview(){
   contenido.classList.remove("hidden");
   vendedorHome.classList.add("hidden");
 
   contenido.innerHTML = `
-    <button type="button" class="secondary" onclick="window.__backFromPdf()">⬅ Volver</button>
+    <button type="button" class="secondary" onclick="renderCotizacion()">⬅ Volver</button>
 
     <div class="card">
       <strong>📄 PDF generado</strong>
-      <div class="note">
-        Si tu teléfono no muestra el PDF aquí, usa <b>Compartir</b> o <b>Descargar</b>.
+      <div class="muted">
+        Si el teléfono no muestra el PDF aquí, usa <b>Compartir</b> o <b>Descargar</b>.
       </div>
     </div>
 
@@ -1195,7 +1050,7 @@ function mostrarPdfEnPantalla(backFn) {
   `;
 }
 
-async function compartirArchivo() {
+async function compartirArchivo(){
   if (!lastFile.blob) return;
 
   try {
@@ -1208,7 +1063,7 @@ async function compartirArchivo() {
         files: [file]
       });
     } else {
-      alert("Compartir no disponible aquí. Usa Descargar.");
+      alert("Compartir no disponible en este dispositivo. Usa Descargar.");
     }
   } catch (e) {
     console.error(e);
@@ -1216,9 +1071,8 @@ async function compartirArchivo() {
   }
 }
 
-function descargarArchivo() {
+function descargarArchivo(){
   if (!lastFile.url) return;
-
   const a = document.createElement("a");
   a.href = lastFile.url;
   a.download = lastFile.filename;
@@ -1227,8 +1081,8 @@ function descargarArchivo() {
   a.remove();
 }
 
-/* ================= HISTORIAL COTIZACIONES ================= */
-function abrirHistorialCotizaciones() {
+/* ================= HISTORIAL ================= */
+function abrirHistorialCotizaciones(){
   vendedorHome.classList.add("hidden");
   contenido.classList.remove("hidden");
 
@@ -1244,26 +1098,24 @@ function abrirHistorialCotizaciones() {
     <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
     <div class="card">
       <strong>📑 Cotizaciones guardadas</strong>
-      <div class="note">Guardadas localmente en este teléfono.</div>
+      <div class="muted">Guardadas localmente en este teléfono.</div>
     </div>
 
-    ${cotizaciones.slice(0, 60).map(c => `
-      <div class="card" onclick="verCotizacionGuardada(${c.id})">
-        <strong>🧾 #${c.id} • ${escapeHtml(moneyL(c.total))}</strong>
-        <div class="note">
+    ${cotizaciones.slice(0, 80).map(c => `
+      <div class="card">
+        <strong>🧾 #${c.id} • ${moneyL(c.total)}</strong>
+        <div class="item-meta">
           ${escapeHtml(c.fecha)}<br>
-          ${c.cliente?.nombre ? `Cliente: <b>${escapeHtml(c.cliente.nombre)}</b>` : "Sin cliente"}
+          ${c.cliente?.nombre ? `Cliente: ${escapeHtml(c.cliente.nombre)}` : "Sin cliente"}
         </div>
-        <span class="badge">Generar PDF</span>
+        <button type="button" class="secondary" onclick="generarPdfDesdeGuardada(${c.id})">📄 Generar PDF</button>
       </div>
     `).join("")}
   `;
 }
 
-function verCotizacionGuardada(id) {
+function generarPdfDesdeGuardada(id){
   const c = cotizaciones.find(x => x.id === id);
   if (!c) return;
-
-  // Generar PDF de una cotización guardada (sin depender del catálogo)
-  crearPdfCotizacion(c, () => abrirHistorialCotizaciones());
+  crearPdfCotizacion(c);
 }
