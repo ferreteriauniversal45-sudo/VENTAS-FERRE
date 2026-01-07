@@ -54,7 +54,19 @@ input, select{
   background:white;
 }
 
+label{
+  display:block;
+  margin:6px 0 6px;
+}
+
 hr{ border:none; border-top:1px solid #E5E7EB; margin:14px 0; }
+
+.note{
+  font-size:13px;
+  color:var(--gris);
+  margin:6px 0 10px;
+  line-height:1.25rem;
+}
 
 /* ---------- LOGIN ---------- */
 .login-bg{
@@ -160,16 +172,37 @@ main{ padding:12px; }
 .modal-card{
   background:white;
   width:100%;
-  max-width:380px;
+  max-width:420px;
   padding:22px;
   border-radius:18px;
-  text-align:center;
+  text-align:left;
   box-shadow:0 14px 40px rgba(0,0,0,.35);
 }
 
 .modal-card h3{
-  margin:8px 0 6px;
+  margin:0 0 6px;
   color:var(--azul);
+  text-align:center;
+}
+
+.modal-card .logo-login{
+  margin-bottom:10px;
+}
+
+/* Lists inside modal */
+.list-scroll{
+  max-height:320px;
+  overflow:auto;
+  padding-right:2px;
+}
+
+.list-scroll .card{
+  border-left:6px solid #CBD5E1;
+  cursor:pointer;
+}
+
+.list-scroll .card:hover{
+  outline:2px solid rgba(242, 140, 28, .25);
 }
 
 /* ---------- COTIZACIÓN UI ---------- */
@@ -199,6 +232,7 @@ main{ padding:12px; }
   display:flex;
   justify-content:space-between;
   gap:10px;
+  align-items:flex-start;
 }
 
 .item-row .name{ font-weight:900; }
@@ -235,6 +269,45 @@ main{ padding:12px; }
   align-items:center;
 }
 
+.small-total{
+  font-size:14px;
+  margin-top:8px;
+}
+
+/* Row of buttons inside modals */
+.btn-row{
+  display:flex;
+  gap:10px;
+  margin-top:10px;
+}
+.btn-row button{
+  margin-bottom:0;
+  flex:1;
+}
+
+/* ---------- price table in product modal ---------- */
+.price-table{
+  background:#F9FAFB;
+  border:1px solid #E5E7EB;
+  border-radius:14px;
+  padding:10px;
+  margin:10px 0 12px;
+}
+
+.price-row{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  padding:6px 4px;
+  border-bottom:1px dashed #E5E7EB;
+  font-size:13px;
+}
+.price-row:last-child{ border-bottom:none; }
+
+.price-row b{
+  color:var(--azul);
+}
+
 /* ---------- PDF preview ---------- */
 .pdf-box{
   background:white;
@@ -250,9 +323,4 @@ main{ padding:12px; }
   border:none;
   border-radius:12px;
   background:#fff;
-}
-
-.note{
-  font-size:13px;
-  color:var(--gris);
 }
