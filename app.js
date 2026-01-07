@@ -1088,8 +1088,13 @@ function compartirArchivo() {
     return;
   }
 
-  // En Android WebView esto abre el selector nativo
-  // (WhatsApp, Gmail, Drive, etc.)
+  // Si estamos en APK (WebView Android)
+  if (window.Android && typeof window.Android.compartirPdfDesdeAndroid === "function") {
+    window.Android.compartirPdfDesdeAndroid(lastFile.url);
+    return;
+  }
+
+  // En web normal (navegador)
   window.open(lastFile.url, "_blank");
 }
 
