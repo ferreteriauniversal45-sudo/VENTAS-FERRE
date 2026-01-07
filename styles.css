@@ -1,0 +1,258 @@
+:root{
+  --azul:#243A8F;
+  --naranja:#F28C1C;
+  --fondo:#F5F6F8;
+  --texto:#1F2937;
+  --gris:#6B7280;
+}
+
+*{ box-sizing:border-box; font-family:system-ui, sans-serif; }
+body{ margin:0; background:var(--fondo); color:var(--texto); }
+
+.hidden{ display:none; }
+#login.hidden{ display:none !important; } /* evita overlays raros */
+
+/* ---------- BOTONES / INPUTS ---------- */
+button{
+  width:100%;
+  padding:14px;
+  border-radius:12px;
+  border:none;
+  margin-bottom:10px;
+  background:var(--naranja);
+  color:white;
+  font-size:15px;
+  font-weight:800;
+}
+
+button.secondary{
+  background:#E5E7EB;
+  color:var(--texto);
+  font-weight:800;
+}
+
+button.danger{
+  background:#B91C1C;
+  color:white;
+}
+
+button.small{
+  width:auto;
+  padding:8px 10px;
+  border-radius:10px;
+  margin:0;
+  font-size:12px;
+}
+
+input, select{
+  width:100%;
+  padding:12px;
+  border-radius:10px;
+  border:1px solid #D1D5DB;
+  margin-bottom:10px;
+  font-size:14px;
+  background:white;
+}
+
+hr{ border:none; border-top:1px solid #E5E7EB; margin:14px 0; }
+
+/* ---------- LOGIN ---------- */
+.login-bg{
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:linear-gradient(135deg, var(--azul), #1b2c6b);
+}
+
+.login-card{
+  background:white;
+  padding:24px;
+  border-radius:18px;
+  width:90%;
+  max-width:360px;
+  box-shadow:0 12px 30px rgba(0,0,0,.25);
+  text-align:center;
+}
+
+.logo-login{
+  width:200px;
+  max-width:100%;
+  display:block;
+  margin:0 auto 16px;
+}
+
+.pin-error{
+  margin-top:6px;
+  padding:10px;
+  background:#FEE2E2;
+  color:#991B1B;
+  border-radius:10px;
+}
+
+/* ---------- HEADER ---------- */
+.app-header{
+  background:var(--azul);
+  color:white;
+  padding:10px 12px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+}
+
+.header-left{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.logo-header{ height:38px; }
+
+.header-text h1{
+  margin:0;
+  font-size:18px;
+}
+
+.header-text small{
+  opacity:.9;
+}
+
+/* ---------- MAIN ---------- */
+main{ padding:12px; }
+
+/* ---------- CARDS ---------- */
+.card{
+  background:white;
+  padding:14px;
+  border-radius:14px;
+  margin-bottom:10px;
+  border-left:6px solid var(--naranja);
+  box-shadow:0 4px 10px rgba(0,0,0,.06);
+}
+
+.card strong{ display:block; margin-bottom:4px; }
+
+.badge{
+  display:inline-block;
+  background:#EEF2FF;
+  color:var(--azul);
+  padding:4px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:800;
+}
+
+/* ---------- MODAL ---------- */
+.modal{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.55);
+  z-index:1000;
+  display:none;              /* no aparece al inicio */
+  align-items:center;
+  justify-content:center;
+  padding:16px;
+}
+
+.modal.show{ display:flex; }
+
+.modal-card{
+  background:white;
+  width:100%;
+  max-width:380px;
+  padding:22px;
+  border-radius:18px;
+  text-align:center;
+  box-shadow:0 14px 40px rgba(0,0,0,.35);
+}
+
+.modal-card h3{
+  margin:8px 0 6px;
+  color:var(--azul);
+}
+
+/* ---------- COTIZACIÓN UI ---------- */
+.quote-top{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.quote-top > div{
+  flex:1;
+  min-width:160px;
+}
+
+.item-row{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  padding:12px;
+  border-radius:14px;
+  background:#FFFFFF;
+  border:1px solid #E5E7EB;
+  margin-bottom:10px;
+}
+
+.item-row .top{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+}
+
+.item-row .name{ font-weight:900; }
+.item-row .meta{ color:var(--gris); font-size:12px; }
+
+.item-row .controls{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+
+.qty{
+  width:90px;
+  margin:0;
+}
+
+.inline{
+  width:auto;
+  padding:10px 12px;
+  margin:0;
+  border-radius:12px;
+}
+
+.total-box{
+  background:white;
+  border:1px solid #E5E7EB;
+  border-radius:14px;
+  padding:12px;
+  font-size:16px;
+  font-weight:900;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+/* ---------- PDF preview ---------- */
+.pdf-box{
+  background:white;
+  border:1px solid #E5E7EB;
+  border-radius:14px;
+  padding:12px;
+  margin:10px 0;
+}
+
+.pdf-viewer{
+  width:100%;
+  height:70vh;
+  border:none;
+  border-radius:12px;
+  background:#fff;
+}
+
+.note{
+  font-size:13px;
+  color:var(--gris);
+}
