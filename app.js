@@ -1082,26 +1082,17 @@ function mostrarPdfPreview(){
   `;
 }
 
-async function compartirArchivo(){
-  if (!lastFile.blob) return;
-
-  try {
-    const file = new File([lastFile.blob], lastFile.filename, { type: lastFile.mime });
-
-    if (navigator.share) {
-      await navigator.share({
-        title: lastFile.title,
-        text: lastFile.text,
-        files: [file]
-      });
-    } else {
-      alert("Compartir no disponible en este dispositivo. Usa Descargar.");
-    }
-  } catch (e) {
-    console.error(e);
-    alert("No se pudo compartir. Usa Descargar.");
+function compartirArchivo() {
+  if (!lastFile || !lastFile.url) {
+    alert("No hay archivo para compartir");
+    return;
   }
+
+  // En Android WebView esto abre el selector nativo
+  // (WhatsApp, Gmail, Drive, etc.)
+  window.open(lastFile.url, "_blank");
 }
+
 
 function descargarArchivo(){
   if (!lastFile.url) return;
