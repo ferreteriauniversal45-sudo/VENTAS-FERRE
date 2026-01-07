@@ -77,12 +77,77 @@
       alt="Ferretería Universal"
     />
     <h3>Nombre del vendedor</h3>
-    <p>Se usará en cotizaciones y documentos</p>
+    <p class="note">Se usará en las cotizaciones (PDF)</p>
 
     <input id="nombreVendedorInput" placeholder="Ej: Juan Pérez" />
 
     <button type="button" onclick="guardarNombreVendedor()">Guardar</button>
     <button type="button" class="secondary" onclick="cerrarModalVendedor()">Cancelar</button>
+  </div>
+</div>
+
+<!-- ================= MODAL CLIENTES (SELECCIONAR / BUSCAR) ================= -->
+<div id="modalClientes" class="modal">
+  <div class="modal-card">
+    <h3>Seleccionar cliente</h3>
+    <p class="note">Busca por nombre o empresa, o crea uno nuevo.</p>
+
+    <input id="buscarClienteInput" placeholder="🔍 Buscar cliente..." />
+
+    <div id="listaClientesModal" class="list-scroll"></div>
+
+    <hr />
+
+    <button type="button" onclick="abrirModalNuevoCliente()">➕ Agregar cliente nuevo</button>
+    <button type="button" class="secondary" onclick="cerrarModalClientes()">Cancelar</button>
+  </div>
+</div>
+
+<!-- ================= MODAL NUEVO CLIENTE ================= -->
+<div id="modalNuevoCliente" class="modal">
+  <div class="modal-card">
+    <h3>Nuevo cliente</h3>
+    <p class="note">Todos los campos son opcionales.</p>
+
+    <input id="ncNombre" placeholder="Nombre del cliente" />
+    <input id="ncEmpresa" placeholder="Empresa" />
+    <input id="ncTelefono" placeholder="Teléfono" />
+    <input id="ncRTN" placeholder="RTN" />
+    <input id="ncUbicacion" placeholder="Ubicación" />
+
+    <button type="button" onclick="guardarClienteDesdeModal()">Guardar cliente</button>
+    <button type="button" class="secondary" onclick="cerrarModalNuevoCliente(true)">Cancelar</button>
+  </div>
+</div>
+
+<!-- ================= MODAL PRODUCTO (CANTIDAD + PRECIO) ================= -->
+<div id="modalProducto" class="modal">
+  <div class="modal-card">
+    <h3 id="mpNombre">Producto</h3>
+    <div id="mpMeta" class="note"></div>
+
+    <div id="mpListaPrecios" class="price-table"></div>
+
+    <label><b>Cantidad</b></label>
+    <input id="mpCantidad" type="number" min="1" value="1" />
+
+    <label><b>Tipo de precio</b></label>
+    <select id="mpTipoPrecio"></select>
+
+    <div id="mpPrecioManualWrap" class="hidden">
+      <label><b>PRECIO VENDEDOR</b></label>
+      <input id="mpPrecioValor" type="number" min="0" step="0.01" placeholder="Ej: 1250.00" />
+    </div>
+
+    <div class="total-box small-total">
+      <span>Total línea</span>
+      <span id="mpTotalLinea">L. 0.00</span>
+    </div>
+
+    <div class="btn-row">
+      <button type="button" onclick="confirmarAgregarProducto()">Agregar</button>
+      <button type="button" class="secondary" onclick="cerrarModalProducto()">Cancelar</button>
+    </div>
   </div>
 </div>
 
