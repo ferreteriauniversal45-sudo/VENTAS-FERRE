@@ -4,15 +4,16 @@
   --fondo:#F5F6F8;
   --texto:#1F2937;
   --gris:#6B7280;
+  --borde:#E5E7EB;
 }
 
 *{ box-sizing:border-box; font-family:system-ui, sans-serif; }
 body{ margin:0; background:var(--fondo); color:var(--texto); }
 
 .hidden{ display:none; }
-#login.hidden{ display:none !important; } /* evita overlays raros */
+#login.hidden{ display:none !important; } /* evita que el login quede encima */
 
-/* ---------- BOTONES / INPUTS ---------- */
+/* ---------- UI base ---------- */
 button{
   width:100%;
   padding:14px;
@@ -20,20 +21,19 @@ button{
   border:none;
   margin-bottom:10px;
   background:var(--naranja);
-  color:white;
+  color:#fff;
   font-size:15px;
-  font-weight:800;
+  font-weight:900;
 }
 
 button.secondary{
   background:#E5E7EB;
-  color:var(--texto);
-  font-weight:800;
+  color:#111;
 }
 
 button.danger{
   background:#B91C1C;
-  color:white;
+  color:#fff;
 }
 
 button.small{
@@ -44,6 +44,12 @@ button.small{
   font-size:12px;
 }
 
+.btn-row{
+  display:flex;
+  gap:10px;
+}
+.btn-row button{ margin-bottom:0; }
+
 input, select{
   width:100%;
   padding:12px;
@@ -51,21 +57,19 @@ input, select{
   border:1px solid #D1D5DB;
   margin-bottom:10px;
   font-size:14px;
-  background:white;
+  background:#fff;
 }
 
-label{
+.label{
   display:block;
+  font-weight:800;
   margin:6px 0 6px;
 }
 
-hr{ border:none; border-top:1px solid #E5E7EB; margin:14px 0; }
-
-.note{
-  font-size:13px;
+.muted{
   color:var(--gris);
-  margin:6px 0 10px;
-  line-height:1.25rem;
+  font-size:13px;
+  margin-top:-6px;
 }
 
 /* ---------- LOGIN ---------- */
@@ -78,11 +82,11 @@ hr{ border:none; border-top:1px solid #E5E7EB; margin:14px 0; }
 }
 
 .login-card{
-  background:white;
+  background:#fff;
   padding:24px;
   border-radius:18px;
   width:90%;
-  max-width:360px;
+  max-width:380px;
   box-shadow:0 12px 30px rgba(0,0,0,.25);
   text-align:center;
 }
@@ -94,18 +98,23 @@ hr{ border:none; border-top:1px solid #E5E7EB; margin:14px 0; }
   margin:0 auto 16px;
 }
 
+.small-logo{
+  width:160px;
+  margin-bottom:10px;
+}
+
 .pin-error{
-  margin-top:6px;
+  margin-top:8px;
   padding:10px;
   background:#FEE2E2;
   color:#991B1B;
-  border-radius:10px;
+  border-radius:12px;
 }
 
 /* ---------- HEADER ---------- */
 .app-header{
   background:var(--azul);
-  color:white;
+  color:#fff;
   padding:10px 12px;
   display:flex;
   align-items:center;
@@ -119,23 +128,20 @@ hr{ border:none; border-top:1px solid #E5E7EB; margin:14px 0; }
   gap:10px;
 }
 
-.logo-header{ height:38px; }
+.logo-header{ height:40px; }
 
 .header-text h1{
   margin:0;
   font-size:18px;
 }
-
-.header-text small{
-  opacity:.9;
-}
+.header-text small{ opacity:.9; }
 
 /* ---------- MAIN ---------- */
 main{ padding:12px; }
 
-/* ---------- CARDS ---------- */
+/* ---------- Cards ---------- */
 .card{
-  background:white;
+  background:#fff;
   padding:14px;
   border-radius:14px;
   margin-bottom:10px;
@@ -143,25 +149,21 @@ main{ padding:12px; }
   box-shadow:0 4px 10px rgba(0,0,0,.06);
 }
 
-.card strong{ display:block; margin-bottom:4px; }
-
-.badge{
-  display:inline-block;
-  background:#EEF2FF;
-  color:var(--azul);
-  padding:4px 10px;
-  border-radius:999px;
-  font-size:12px;
-  font-weight:800;
+.card-lite{
+  background:#fff;
+  border:1px solid var(--borde);
+  border-radius:14px;
+  padding:12px;
+  margin-bottom:10px;
 }
 
-/* ---------- MODAL ---------- */
+/* ---------- Modal ---------- */
 .modal{
   position:fixed;
   inset:0;
   background:rgba(0,0,0,.55);
   z-index:1000;
-  display:none;              /* no aparece al inicio */
+  display:none;            /* no aparece al inicio */
   align-items:center;
   justify-content:center;
   padding:16px;
@@ -170,79 +172,98 @@ main{ padding:12px; }
 .modal.show{ display:flex; }
 
 .modal-card{
-  background:white;
+  background:#fff;
   width:100%;
   max-width:420px;
-  padding:22px;
+  padding:20px;
   border-radius:18px;
-  text-align:left;
   box-shadow:0 14px 40px rgba(0,0,0,.35);
 }
 
-.modal-card h3{
-  margin:0 0 6px;
-  color:var(--azul);
-  text-align:center;
-}
-
-.modal-card .logo-login{
+.modal-list{
+  max-height:320px;
+  overflow:auto;
+  border:1px solid var(--borde);
+  border-radius:12px;
+  padding:8px;
+  background:#fff;
   margin-bottom:10px;
 }
 
-/* Lists inside modal */
-.list-scroll{
-  max-height:320px;
-  overflow:auto;
-  padding-right:2px;
+.list-item{
+  padding:12px;
+  border-radius:12px;
+  border:1px solid var(--borde);
+  margin-bottom:8px;
+  background:#fff;
 }
 
-.list-scroll .card{
-  border-left:6px solid #CBD5E1;
-  cursor:pointer;
+.list-item:active{
+  transform:scale(0.99);
 }
 
-.list-scroll .card:hover{
-  outline:2px solid rgba(242, 140, 28, .25);
+.list-title{ font-weight:900; }
+.list-sub{ color:var(--gris); font-size:12px; margin-top:2px; }
+
+/* ---------- Prices list in product modal ---------- */
+.prices-list{
+  display:grid;
+  grid-template-columns: 1fr auto;
+  gap:8px 10px;
+  font-size:13px;
 }
 
-/* ---------- COTIZACIÓN UI ---------- */
-.quote-top{
+.prices-list .k{ color:var(--gris); font-weight:800; }
+.prices-list .v{ font-weight:900; }
+
+/* ---------- Cotización UI ---------- */
+.row{
   display:flex;
   gap:10px;
   flex-wrap:wrap;
 }
 
-.quote-top > div{
+.row > .col{
   flex:1;
   min-width:160px;
 }
 
-.item-row{
-  display:flex;
-  flex-direction:column;
-  gap:8px;
-  padding:12px;
+.total-box{
+  background:#fff;
+  border:1px solid var(--borde);
   border-radius:14px;
-  background:#FFFFFF;
-  border:1px solid #E5E7EB;
+  padding:12px;
+  font-size:16px;
+  font-weight:900;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-top:10px;
+}
+
+.item-row{
+  background:#fff;
+  border:1px solid var(--borde);
+  border-radius:14px;
+  padding:12px;
   margin-bottom:10px;
 }
 
-.item-row .top{
+.item-top{
   display:flex;
   justify-content:space-between;
   gap:10px;
-  align-items:flex-start;
 }
 
-.item-row .name{ font-weight:900; }
-.item-row .meta{ color:var(--gris); font-size:12px; }
+.item-name{ font-weight:900; }
+.item-meta{ color:var(--gris); font-size:12px; margin-top:2px; }
 
-.item-row .controls{
+.item-controls{
   display:flex;
   gap:8px;
-  align-items:center;
   flex-wrap:wrap;
+  align-items:center;
+  margin-top:10px;
 }
 
 .qty{
@@ -257,61 +278,20 @@ main{ padding:12px; }
   border-radius:12px;
 }
 
-.total-box{
-  background:white;
-  border:1px solid #E5E7EB;
-  border-radius:14px;
-  padding:12px;
-  font-size:16px;
-  font-weight:900;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-}
-
-.small-total{
-  font-size:14px;
-  margin-top:8px;
-}
-
-/* Row of buttons inside modals */
-.btn-row{
-  display:flex;
-  gap:10px;
-  margin-top:10px;
-}
-.btn-row button{
-  margin-bottom:0;
-  flex:1;
-}
-
-/* ---------- price table in product modal ---------- */
-.price-table{
-  background:#F9FAFB;
-  border:1px solid #E5E7EB;
-  border-radius:14px;
-  padding:10px;
-  margin:10px 0 12px;
-}
-
-.price-row{
-  display:flex;
-  justify-content:space-between;
-  gap:10px;
-  padding:6px 4px;
-  border-bottom:1px dashed #E5E7EB;
-  font-size:13px;
-}
-.price-row:last-child{ border-bottom:none; }
-
-.price-row b{
+.badge{
+  display:inline-block;
+  background:#EEF2FF;
   color:var(--azul);
+  padding:4px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:900;
 }
 
 /* ---------- PDF preview ---------- */
 .pdf-box{
-  background:white;
-  border:1px solid #E5E7EB;
+  background:#fff;
+  border:1px solid var(--borde);
   border-radius:14px;
   padding:12px;
   margin:10px 0;
