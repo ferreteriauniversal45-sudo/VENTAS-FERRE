@@ -234,7 +234,7 @@ async function ensureCatalogoCargado(){
 }
 
 /* ================= CLIENTES (pantalla normal) ================= */
-function abrirClientes(){
+function abrirClientes() {
   vendedorHome.classList.add("hidden");
   contenido.classList.remove("hidden");
 
@@ -243,32 +243,64 @@ function abrirClientes(){
 
     <div class="card">
       <strong>👤 Clientes</strong>
-      <div class="muted">Se guardan en el teléfono (no se borran al salir).</div>
+      <div class="muted">
+        Guardados localmente en este teléfono.
+      </div>
     </div>
 
-    <input id="cNombre" placeholder="Nombre (opcional)" />
-    <input id="cEmpresa" placeholder="Empresa (opcional)" />
-    <input id="cTelefono" placeholder="Teléfono (opcional)" />
-    <input id="cRTN" placeholder="RTN (opcional)" />
-    <input id="cUbicacion" placeholder="Ubicación (opcional)" />
+    <input id="cNombre" placeholder="Nombre del cliente (opcional)">
+    <input id="cEmpresa" placeholder="Empresa (opcional)">
+    <input id="cTelefono" placeholder="Teléfono (opcional)">
+    <input id="cRTN" placeholder="RTN (opcional)">
+    <input id="cUbicacion" placeholder="Ubicación (opcional)">
 
     <button type="button" onclick="guardarClientePantalla()">Guardar cliente</button>
 
-    <hr />
+    <hr>
 
-    ${clientes.length ? clientes.map(c => `
-      <div class="card">
-        <strong>${escapeHtml(c.nombre || "Cliente sin nombre")}</strong>
-        <div class="item-meta">
-          ${c.empresa ? `🏢 ${escapeHtml(c.empresa)}<br>` : ""}
-          ${c.telefono ? `📞 ${escapeHtml(c.telefono)}<br>` : ""}
-          ${c.rtn ? `🧾 RTN: ${escapeHtml(c.rtn)}<br>` : ""}
-          ${c.ubicacion ? `📍 ${escapeHtml(c.ubicacion)}` : ""}
-        </div>
-      </div>
-    `).join("") : `<div class="card"><strong>No hay clientes aún.</strong></div>`}
+    ${
+      clientes.length
+        ? clientes.map(c => `
+          <div class="list-item">
+            <div class="list-title">
+              ${escapeHtml(c.nombre || "Cliente sin nombre")}
+            </div>
+
+            <div class="list-sub">
+              ${c.empresa ? "🏢 " + escapeHtml(c.empresa) + "<br>" : ""}
+              ${c.telefono ? "📞 " + escapeHtml(c.telefono) : ""}
+            </div>
+
+            ${
+              c.telefono
+                ? `
+                  <div style="margin-top:10px; display:flex; gap:14px;">
+                    <span
+                      style="font-size:22px; cursor:pointer;"
+                      title="Llamar"
+                      onclick="llamarCliente('${c.telefono}')"
+                    >📞</span>
+
+                    <span
+                      style="font-size:22px; cursor:pointer;"
+                      title="WhatsApp"
+                      onclick="whatsappCliente('${c.telefono}')"
+                    >💬</span>
+                  </div>
+                `
+                : ""
+            }
+          </div>
+        `).join("")
+        : `
+          <div class="card">
+            <strong>No hay clientes registrados.</strong>
+          </div>
+        `
+    }
   `;
 }
+
 
 function guardarClientePantalla(){
   const nuevo = {
@@ -1118,4 +1150,29 @@ function generarPdfDesdeGuardada(id){
   const c = cotizaciones.find(x => x.id === id);
   if (!c) return;
   crearPdfCotizacion(c);
+}
+function limpiarTelefono(num) {
+  // elimina espacios, guiones, paréntesis
+  return String(num || "").replace(/\D/g, "");
+}
+
+function llamarCliente(telefono) {
+  const num = limpiarTelefono(telefono);
+  if (!num) {
+    alert("El cliente no tiene teléfono válido");
+    return;
+  }
+  window.location.href = `tel:${num}`;
+}
+
+function whatsappCliente(telefono) {
+  const num = limpiarTelefono(telefono);
+  if (!num) {
+    alert("El cliente no tiene teléfono válido");
+    return;
+  }
+
+  // Honduras: 504
+  const url = `https://wa.me/504${num}`;
+  window.open(url, "_blank");
 }
