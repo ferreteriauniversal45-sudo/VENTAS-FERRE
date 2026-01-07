@@ -1,3 +1,13 @@
+/* =========================================================
+   Ferretería Universal - App VENDEDOR (Clientes + Cotizaciones)
+   - Clientes locales (permanentes)
+   - Cotizaciones locales
+   - Selección de cliente por modal (buscar / crear)
+   - Agregar producto por modal (cantidad + tipo de precio + ver precios)
+   - Tipos de precio mezclados por producto + PRECIO VENDEDOR
+   - PDF tipo ticket (80mm) + marca de agua + compartir/descargar
+   ========================================================= */
+
 /* ================= CONFIG ================= */
 const BASE_RAW = "https://raw.githubusercontent.com/ferreteriauniversal45-sudo/ferreteria-inventario-app/main/";
 const URLS = {
@@ -19,7 +29,7 @@ const PRICE_TYPES = [
   "precioB",
   "precioC",
   "mayoreo",
-  "precioVendedor" // NUEVO
+  "precioVendedor" // NUEVO: precio manual por el vendedor
 ];
 
 const PRICE_LABELS = {
@@ -34,7 +44,11 @@ const PRICE_LABELS = {
 /* ================= HELPERS ================= */
 function moneyL(value) {
   const n = Number(value || 0);
-  return `L. ${n.toFixed(2)}`;
+  // Forzamos coma para miles (1,234.56)
+  return "L. " + n.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
 }
 
 function trunc(s, max = 42) {
@@ -47,6 +61,10 @@ function nowStr() {
   return new Date().toLocaleString("es-HN");
 }
 
+function makeId() {
+  return Date.now() + Math.floor(Math.random() * 1000000);
+}
+
 async function fetchJson(url) {
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`HTTP ${res.status} en ${url}`);
@@ -54,7 +72,7 @@ async function fetchJson(url) {
 }
 
 function escapeHtml(s) {
-  return String(s || "")
+  return String(s ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -62,21 +80,30 @@ function escapeHtml(s) {
     .replaceAll("'", "&#039;");
 }
 
+function nonEmpty(s) {
+  return (s || "").toString().trim().length > 0;
+}
+
 /* ================= STATE ================= */
 let selectedRole = null;
 
+// Persistentes (NO borrar al logout)
 let nombreVendedor = localStorage.getItem("nombreVendedor") || "";
+let clientes = JSON.parse(localStorage.getItem("clientes") || "[]");
+let cotizaciones = JSON.parse(localStorage.getItem("cotizaciones") || "[]");
 
-let clientes = JSON.parse(localStorage.getItem("clientes") || "[]");          // NO se borran
-let cotizaciones = JSON.parse(localStorage.getItem("cotizaciones") || "[]");  // NO se borran
-
-let catalogo = [];
-let catalogoMap = new Map();
+// Catálogo remoto
+let catalogo = [];               // [{codigo, producto, departamento, stockTotal, precios:{...}}]
+let catalogoMap = new Map();     // codigo -> obj
 let catalogoCargado = false;
 
-let cotizacionActual = null;
+// Cotización actual
+let cotizacionActual = null;     // {id, fecha, clienteId, defaultPriceType, items:[{id,codigo,qty,priceType,customPrice}]}
 
-// Archivo generado para compartir/descargar
+// Modal producto (estado)
+let productoModal = null;        // {codigo, ...}
+
+// PDF generado (para compartir/descargar)
 let lastFile = {
   blob: null,
   url: null,
@@ -101,11 +128,51 @@ const contenido = document.getElementById("contenido");
 const headerTitle = document.getElementById("headerTitle");
 
 const modalVendedor = document.getElementById("modalVendedor");
+const modalClientes = document.getElementById("modalClientes");
+const modalNuevoCliente = document.getElementById("modalNuevoCliente");
+const modalProducto = document.getElementById("modalProducto");
+
+// Inputs / containers de modales
+const buscarClienteInput = document.getElementById("buscarClienteInput");
+const listaClientesModal = document.getElementById("listaClientesModal");
+
+// Nuevo cliente
+const ncNombre = document.getElementById("ncNombre");
+const ncEmpresa = document.getElementById("ncEmpresa");
+const ncTelefono = document.getElementById("ncTelefono");
+const ncRTN = document.getElementById("ncRTN");
+const ncUbicacion = document.getElementById("ncUbicacion");
+
+// Modal producto
+const mpNombre = document.getElementById("mpNombre");
+const mpMeta = document.getElementById("mpMeta");
+const mpListaPrecios = document.getElementById("mpListaPrecios");
+const mpCantidad = document.getElementById("mpCantidad");
+const mpTipoPrecio = document.getElementById("mpTipoPrecio");
+const mpPrecioManualWrap = document.getElementById("mpPrecioManualWrap");
+const mpPrecioValor = document.getElementById("mpPrecioValor");
+const mpTotalLinea = document.getElementById("mpTotalLinea");
 
 /* ================= INIT ================= */
 if (localStorage.getItem("role")) {
   startApp();
 }
+
+pinInput?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") validatePin();
+});
+
+buscarClienteInput?.addEventListener("input", () => {
+  renderListaClientesModal();
+});
+
+// Producto modal: recalcular total en vivo
+mpCantidad?.addEventListener("input", () => actualizarProductoModalTotal());
+mpTipoPrecio?.addEventListener("change", () => {
+  togglePrecioManual();
+  actualizarProductoModalTotal();
+});
+mpPrecioValor?.addEventListener("input", () => actualizarProductoModalTotal());
 
 /* ================= LOGIN ================= */
 function selectRole(role) {
@@ -138,16 +205,12 @@ function validatePin() {
   }
 }
 
-// Enter para validar PIN
-pinInput?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") validatePin();
-});
-
 function startApp() {
-  // Ocultar login fuerte (evita overlay)
+  // Ocultar login fuerte (evita overlays)
   loginScreen.classList.add("hidden");
   loginScreen.style.display = "none";
 
+  // Mostrar app
   appScreen.classList.remove("hidden");
   appScreen.style.display = "block";
 
@@ -156,6 +219,7 @@ function startApp() {
   contenido.classList.add("hidden");
 
   const role = localStorage.getItem("role");
+
   if (role === "VENDEDOR") {
     headerTitle.textContent = "Cotizaciones";
     vendedorHome.classList.remove("hidden");
@@ -164,9 +228,7 @@ function startApp() {
     contenido.innerHTML = `
       <div class="card">
         <strong>⚠️ Rol no implementado</strong>
-        <div style="color:#6B7280; margin-top:6px;">
-          Por ahora este módulo está hecho para <b>VENDEDOR</b>.
-        </div>
+        <div class="note">Por ahora este módulo está hecho para <b>VENDEDOR</b>.</div>
       </div>
     `;
   }
@@ -199,23 +261,19 @@ function guardarNombreVendedor() {
   localStorage.setItem("nombreVendedor", nombreVendedor);
   modalVendedor.classList.remove("show");
 
-  // reanudar acción pendiente si existiera
+  // Reanudar acción pendiente (si existe)
   const pending = localStorage.getItem("accionPendiente");
   if (pending) {
     localStorage.removeItem("accionPendiente");
     const obj = JSON.parse(pending);
 
-    if (obj.type === "cot_pdf") {
-      generarPdfCotizacion(true);
-    }
-    if (obj.type === "cot_guardar") {
-      guardarCotizacion(true);
-    }
+    if (obj.type === "cot_guardar") guardarCotizacion(true);
+    if (obj.type === "cot_pdf") generarPdfCotizacion(true);
   }
 }
 
 function ensureNombreVendedor(pendingObj) {
-  if (nombreVendedor && nombreVendedor.trim()) return true;
+  if (nonEmpty(nombreVendedor)) return true;
   localStorage.setItem("accionPendiente", JSON.stringify(pendingObj));
   abrirModalVendedor();
   return false;
@@ -227,64 +285,173 @@ function volverHome() {
   vendedorHome.classList.remove("hidden");
 }
 
-/* ================= CLIENTES ================= */
+/* ================= CLIENTES (pantalla de administración) ================= */
 function abrirClientes() {
   vendedorHome.classList.add("hidden");
   contenido.classList.remove("hidden");
+
+  const rows = clientes.length
+    ? clientes.map(c => `
+        <div class="card">
+          <strong>${escapeHtml(c.nombre || "Cliente sin nombre")}</strong>
+          <div class="note">
+            ${c.empresa ? `🏢 ${escapeHtml(c.empresa)}<br>` : ""}
+            ${c.telefono ? `📞 ${escapeHtml(c.telefono)}<br>` : ""}
+            ${c.rtn ? `🧾 RTN: ${escapeHtml(c.rtn)}<br>` : ""}
+            ${c.ubicacion ? `📍 ${escapeHtml(c.ubicacion)}` : ""}
+          </div>
+        </div>
+      `).join("")
+    : `<div class="card"><strong>No hay clientes aún.</strong></div>`;
 
   contenido.innerHTML = `
     <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
 
     <div class="card">
       <strong>👤 Clientes</strong>
-      <div style="color:#6B7280; font-size:13px;">
-        Se guardan localmente en este teléfono (no se borran al cerrar sesión).
-      </div>
+      <div class="note">Se guardan localmente en este teléfono (no se borran al cerrar sesión).</div>
     </div>
 
     <input id="cNombre" placeholder="Nombre del cliente (opcional)">
+    <input id="cEmpresa" placeholder="Empresa (opcional)">
+    <input id="cTelefono" placeholder="Teléfono (opcional)">
     <input id="cRTN" placeholder="RTN (opcional)">
     <input id="cUbicacion" placeholder="Ubicación (opcional)">
-    <input id="cTelefono" placeholder="Teléfono (opcional)">
-    <input id="cEmpresa" placeholder="Empresa (opcional)">
 
-    <button type="button" onclick="guardarCliente()">Guardar Cliente</button>
-
+    <button type="button" onclick="guardarClientePantalla()">Guardar Cliente</button>
     <hr>
 
-    ${
-      clientes.length
-        ? clientes.map(c => `
-          <div class="card">
-            <strong>${escapeHtml(c.nombre || "Cliente sin nombre")}</strong>
-            <div style="color:#6B7280; font-size:12px;">
-              ${c.empresa ? `🏢 ${escapeHtml(c.empresa)}<br>` : ""}
-              ${c.telefono ? `📞 ${escapeHtml(c.telefono)}<br>` : ""}
-              ${c.rtn ? `🧾 RTN: ${escapeHtml(c.rtn)}<br>` : ""}
-              ${c.ubicacion ? `📍 ${escapeHtml(c.ubicacion)}` : ""}
-            </div>
-          </div>
-        `).join("")
-        : `<div class="card"><strong>No hay clientes aún.</strong></div>`
-    }
+    ${rows}
   `;
 }
 
-function guardarCliente() {
+function guardarClientePantalla() {
+  const nombre = document.getElementById("cNombre").value || "";
+  const empresa = document.getElementById("cEmpresa").value || "";
+  const telefono = document.getElementById("cTelefono").value || "";
+  const rtn = document.getElementById("cRTN").value || "";
+  const ubicacion = document.getElementById("cUbicacion").value || "";
+
   clientes.push({
-    id: Date.now(),
-    nombre: document.getElementById("cNombre").value || "",
-    rtn: document.getElementById("cRTN").value || "",
-    ubicacion: document.getElementById("cUbicacion").value || "",
-    telefono: document.getElementById("cTelefono").value || "",
-    empresa: document.getElementById("cEmpresa").value || "",
+    id: makeId(),
+    nombre,
+    empresa,
+    telefono,
+    rtn,
+    ubicacion
   });
 
   localStorage.setItem("clientes", JSON.stringify(clientes));
   abrirClientes();
 }
 
-/* ================= LOGO DATAURL (para PDF) ================= */
+/* ================= MODAL CLIENTES (selección en cotización) ================= */
+function abrirModalClientes() {
+  buscarClienteInput.value = "";
+  renderListaClientesModal();
+  modalClientes.classList.add("show");
+  setTimeout(() => buscarClienteInput.focus(), 50);
+}
+
+function cerrarModalClientes() {
+  modalClientes.classList.remove("show");
+}
+
+function renderListaClientesModal() {
+  if (!listaClientesModal) return;
+
+  const q = (buscarClienteInput.value || "").toLowerCase().trim();
+
+  const filtrados = clientes.filter(c => {
+    const nombre = (c.nombre || "").toLowerCase();
+    const empresa = (c.empresa || "").toLowerCase();
+    return nombre.includes(q) || empresa.includes(q);
+  });
+
+  if (!filtrados.length) {
+    listaClientesModal.innerHTML = `
+      <div class="card">
+        <strong>No hay coincidencias</strong>
+        <div class="note">Puedes crear un cliente nuevo.</div>
+      </div>
+    `;
+    return;
+  }
+
+  listaClientesModal.innerHTML = filtrados
+    .slice(0, 60)
+    .map(c => `
+      <div class="card" onclick="seleccionarClienteCotizacion(${c.id})">
+        <strong>${escapeHtml(c.nombre || "Cliente sin nombre")}</strong>
+        <div class="note">
+          ${c.empresa ? `🏢 ${escapeHtml(c.empresa)}<br>` : ""}
+          ${c.telefono ? `📞 ${escapeHtml(c.telefono)}` : ""}
+        </div>
+        <span class="badge">Seleccionar</span>
+      </div>
+    `)
+    .join("");
+}
+
+function seleccionarClienteCotizacion(id) {
+  if (!cotizacionActual) return;
+
+  cotizacionActual.clienteId = id;
+  cerrarModalClientes();
+  actualizarClienteSeleccionadoUI();
+}
+
+/* ================= MODAL NUEVO CLIENTE (desde cotización) ================= */
+function abrirModalNuevoCliente() {
+  // Limpia campos
+  ncNombre.value = "";
+  ncEmpresa.value = "";
+  ncTelefono.value = "";
+  ncRTN.value = "";
+  ncUbicacion.value = "";
+
+  // Cambiar modal
+  modalClientes.classList.remove("show");
+  modalNuevoCliente.classList.add("show");
+
+  setTimeout(() => ncNombre.focus(), 50);
+}
+
+function cerrarModalNuevoCliente(volverAClientes) {
+  modalNuevoCliente.classList.remove("show");
+  if (volverAClientes) {
+    // Volver al modal de clientes para seguir buscando/seleccionando
+    modalClientes.classList.add("show");
+    renderListaClientesModal();
+    setTimeout(() => buscarClienteInput.focus(), 50);
+  }
+}
+
+function guardarClienteDesdeModal() {
+  const nuevo = {
+    id: makeId(),
+    nombre: ncNombre.value || "",
+    empresa: ncEmpresa.value || "",
+    telefono: ncTelefono.value || "",
+    rtn: ncRTN.value || "",
+    ubicacion: ncUbicacion.value || "",
+  };
+
+  clientes.push(nuevo);
+  localStorage.setItem("clientes", JSON.stringify(clientes));
+
+  // Seleccionar automáticamente en la cotización
+  if (cotizacionActual) {
+    cotizacionActual.clienteId = nuevo.id;
+  }
+
+  // Cerrar modales y actualizar UI
+  modalNuevoCliente.classList.remove("show");
+  modalClientes.classList.remove("show");
+  actualizarClienteSeleccionadoUI();
+}
+
+/* ================= LOGO -> DataURL (para PDF) ================= */
 function blobToDataURL(blob) {
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
@@ -336,7 +503,7 @@ async function ensureCatalogoCargado() {
   catalogoCargado = true;
 }
 
-/* ================= COTIZACIONES UI ================= */
+/* ================= COTIZACIONES ================= */
 function abrirCotizacion() {
   vendedorHome.classList.add("hidden");
   contenido.classList.remove("hidden");
@@ -349,11 +516,11 @@ function abrirCotizacion() {
   ensureCatalogoCargado()
     .then(() => {
       cotizacionActual = {
-        id: Date.now(),
+        id: makeId(),
         fecha: nowStr(),
         clienteId: "",
         defaultPriceType: "precio",
-        items: [] // {codigo, qty, priceType, customPrice}
+        items: [] // {id,codigo,qty,priceType,customPrice}
       };
       renderCotizacionUI();
     })
@@ -363,52 +530,38 @@ function abrirCotizacion() {
         <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
         <div class="card">
           <strong>❌ No se pudo cargar el catálogo.</strong>
-          <div style="color:#6B7280; margin-top:6px;">
-            Revisa tu internet (los datos vienen desde GitHub).
-          </div>
+          <div class="note">Revisa tu internet. (Los datos vienen desde GitHub)</div>
         </div>
       `;
     });
 }
 
 function renderCotizacionUI() {
-  const clienteOptions = clientes.map(c => {
-    const label = (c.nombre && c.nombre.trim()) ? c.nombre : "Cliente sin nombre";
-    return `<option value="${c.id}">${escapeHtml(label)}</option>`;
-  }).join("");
-
-  const defaultPriceOptions = PRICE_TYPES.map(t => {
-    return `<option value="${t}">${PRICE_LABELS[t]}</option>`;
-  }).join("");
+  if (!cotizacionActual) return;
 
   contenido.innerHTML = `
     <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
 
     <div class="card">
       <strong>🧾 Nueva Cotización</strong>
-      <div style="color:#6B7280; font-size:13px;">
-        Vendedor: <b>${escapeHtml(nombreVendedor || "No configurado")}</b> • ${escapeHtml(cotizacionActual.fecha)}
+      <div class="note">
+        Fecha: <b>${escapeHtml(cotizacionActual.fecha)}</b><br>
+        Vendedor: <b>${escapeHtml(nombreVendedor || "No configurado")}</b>
+        <button type="button" class="inline secondary" onclick="abrirModalVendedor()" style="margin-left:8px;">Editar</button>
       </div>
-      <div style="margin-top:10px;">
-        <span class="badge">SOLO COTIZACIÓN • SIN VALIDEZ</span>
-      </div>
+      <span class="badge">SOLO COTIZACIÓN • SIN VALIDEZ</span>
     </div>
 
-    <div class="quote-top">
-      <div>
-        <label><b>Cliente</b></label>
-        <select id="cotCliente">
-          <option value="">(Sin cliente)</option>
-          ${clienteOptions}
-        </select>
-      </div>
+    <div class="card">
+      <strong>👤 Cliente</strong>
+      <div id="cotClienteInfo" class="note"></div>
+      <button type="button" class="secondary" onclick="abrirModalClientes()">Seleccionar / Buscar cliente</button>
+    </div>
 
-      <div>
-        <label><b>Precio por defecto al agregar</b></label>
-        <select id="cotDefaultPrice">
-          ${defaultPriceOptions}
-        </select>
-      </div>
+    <div class="card">
+      <strong>💲 Precio por defecto al agregar</strong>
+      <div class="note">Cada producto puede usar un tipo diferente (mezclados).</div>
+      <select id="cotDefaultPrice"></select>
     </div>
 
     <input id="cotBuscar" placeholder="🔍 Buscar producto por código o nombre" />
@@ -418,9 +571,7 @@ function renderCotizacionUI() {
 
     <div class="card">
       <strong>📦 Productos agregados</strong>
-      <div style="color:#6B7280; font-size:13px;">
-        Cada producto puede usar un tipo de precio diferente. Usa “PRECIO VENDEDOR” para precio manual.
-      </div>
+      <div class="note">Puedes cambiar cantidad, tipo de precio o quitar.</div>
     </div>
 
     <div id="cotItems"></div>
@@ -436,22 +587,48 @@ function renderCotizacionUI() {
     <button type="button" class="secondary" onclick="generarPdfCotizacion()">📄 Generar PDF</button>
   `;
 
-  document.getElementById("cotDefaultPrice").value = cotizacionActual.defaultPriceType;
+  // Cargar opciones precio por defecto
+  const sel = document.getElementById("cotDefaultPrice");
+  sel.innerHTML = PRICE_TYPES.map(t => `<option value="${t}">${PRICE_LABELS[t]}</option>`).join("");
+  sel.value = cotizacionActual.defaultPriceType;
 
-  document.getElementById("cotCliente").addEventListener("change", (e) => {
-    cotizacionActual.clienteId = e.target.value || "";
-  });
-
-  document.getElementById("cotDefaultPrice").addEventListener("change", (e) => {
+  sel.addEventListener("change", (e) => {
     cotizacionActual.defaultPriceType = e.target.value;
-    renderCotResultados();
-    renderCotItems();
+    renderCotResultados(); // para que muestre etiqueta/valor
   });
 
-  document.getElementById("cotBuscar").addEventListener("input", () => renderCotResultados());
+  // Buscar productos
+  const buscador = document.getElementById("cotBuscar");
+  buscador.addEventListener("input", () => renderCotResultados());
 
+  actualizarClienteSeleccionadoUI();
   renderCotResultados();
   renderCotItems();
+}
+
+function actualizarClienteSeleccionadoUI() {
+  const el = document.getElementById("cotClienteInfo");
+  if (!el || !cotizacionActual) return;
+
+  if (!cotizacionActual.clienteId) {
+    el.innerHTML = `Sin cliente seleccionado.`;
+    return;
+  }
+
+  const c = clientes.find(x => String(x.id) === String(cotizacionActual.clienteId));
+  if (!c) {
+    el.innerHTML = `Cliente no encontrado.`;
+    return;
+  }
+
+  const parts = [];
+  parts.push(`<b>${escapeHtml(c.nombre || "Cliente sin nombre")}</b>`);
+  if (c.empresa) parts.push(`🏢 ${escapeHtml(c.empresa)}`);
+  if (c.telefono) parts.push(`📞 ${escapeHtml(c.telefono)}`);
+  if (c.rtn) parts.push(`🧾 RTN: ${escapeHtml(c.rtn)}`);
+  if (c.ubicacion) parts.push(`📍 ${escapeHtml(c.ubicacion)}`);
+
+  el.innerHTML = parts.join("<br>");
 }
 
 function getUnitPrice(prod, item) {
@@ -464,58 +641,231 @@ function getUnitPrice(prod, item) {
   const val = prod.precios?.[item.priceType];
   if (val !== undefined && val !== null) return Number(val || 0);
 
-  // fallback
+  // fallback a precio público
   const base = prod.precios?.precio;
   return Number(base || 0);
 }
 
 function renderCotResultados() {
-  const q = (document.getElementById("cotBuscar").value || "").toLowerCase().trim();
   const cont = document.getElementById("cotResultados");
+  const input = document.getElementById("cotBuscar");
+  if (!cont || !input) return;
 
+  const q = (input.value || "").toLowerCase().trim();
   if (!q) {
     cont.innerHTML = `<div class="card"><strong>Escribe para buscar productos…</strong></div>`;
     return;
   }
 
-  const encontrados = catalogo
-    .filter(p =>
-      (p.codigo || "").toLowerCase().includes(q) ||
-      (p.producto || "").toLowerCase().includes(q)
-    )
-    .slice(0, 20);
+  const encontrados = catalogo.filter(p =>
+    (p.codigo || "").toLowerCase().includes(q) ||
+    (p.producto || "").toLowerCase().includes(q)
+  ).slice(0, 25);
 
   if (!encontrados.length) {
     cont.innerHTML = `<div class="card"><strong>No se encontraron productos.</strong></div>`;
     return;
   }
 
+  const dummyItem = { priceType: cotizacionActual.defaultPriceType, customPrice: 0 };
+
   cont.innerHTML = encontrados.map(p => {
-    // precio mostrado según default
-    const dummyItem = { priceType: cotizacionActual.defaultPriceType, customPrice: 0 };
-    const precio = getUnitPrice(p, dummyItem);
+    const precio = (dummyItem.priceType === "precioVendedor")
+      ? 0
+      : getUnitPrice(p, dummyItem);
+
+    const etiqueta = PRICE_LABELS[dummyItem.priceType];
+    const precioTxt = dummyItem.priceType === "precioVendedor" ? "Manual" : moneyL(precio);
 
     return `
       <div class="card">
         <strong>${escapeHtml(trunc(p.producto, 60))}</strong>
-        <div style="color:#6B7280; font-size:12px;">
-          Código: ${escapeHtml(p.codigo)} • Stock: ${p.stockTotal}
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:10px;">
-          <span class="badge">${PRICE_LABELS[cotizacionActual.defaultPriceType]} • ${moneyL(precio)}</span>
-          <button type="button" class="inline" onclick="cotAgregar('${p.codigo}')">➕ Agregar</button>
-        </div>
+        <div class="note">Código: <b>${escapeHtml(p.codigo)}</b> • Stock: <b>${p.stockTotal}</b></div>
+        <span class="badge">${escapeHtml(etiqueta)} • ${escapeHtml(precioTxt)}</span>
+        <div style="height:8px"></div>
+        <button type="button" class="inline" onclick="abrirModalProducto('${escapeHtml(p.codigo)}')">➕ Seleccionar</button>
       </div>
     `;
   }).join("");
 }
 
+/* ================= MODAL PRODUCTO (cantidad + tipo + precios) ================= */
+function abrirModalProducto(codigo) {
+  const prod = catalogoMap.get(codigo);
+  if (!prod) return;
+
+  productoModal = prod;
+
+  mpNombre.textContent = prod.producto || "Producto";
+  mpMeta.innerHTML = `Código: <b>${escapeHtml(prod.codigo)}</b> • Stock total: <b>${prod.stockTotal}</b>`;
+
+  // Render tabla de precios
+  const rows = PRICE_TYPES.map(t => {
+    const label = PRICE_LABELS[t];
+    const val = (t === "precioVendedor") ? "Manual" : moneyL(Number(prod.precios?.[t] || 0));
+    return `<div class="price-row"><span>${escapeHtml(label)}</span><b>${escapeHtml(val)}</b></div>`;
+  }).join("");
+  mpListaPrecios.innerHTML = rows;
+
+  // Select de tipo precio
+  mpTipoPrecio.innerHTML = PRICE_TYPES.map(t => {
+    const val = (t === "precioVendedor") ? "Manual" : moneyL(Number(prod.precios?.[t] || 0));
+    return `<option value="${t}">${escapeHtml(PRICE_LABELS[t])} • ${escapeHtml(val)}</option>`;
+  }).join("");
+
+  mpCantidad.value = 1;
+  mpTipoPrecio.value = cotizacionActual?.defaultPriceType || "precio";
+
+  // Precio manual default
+  mpPrecioValor.value = "";
+
+  togglePrecioManual();
+  actualizarProductoModalTotal();
+
+  modalProducto.classList.add("show");
+}
+
+function cerrarModalProducto() {
+  modalProducto.classList.remove("show");
+  productoModal = null;
+}
+
+function togglePrecioManual() {
+  if (!mpPrecioManualWrap) return;
+  const t = mpTipoPrecio.value;
+  if (t === "precioVendedor") {
+    mpPrecioManualWrap.classList.remove("hidden");
+  } else {
+    mpPrecioManualWrap.classList.add("hidden");
+  }
+}
+
+function actualizarProductoModalTotal() {
+  if (!productoModal) return;
+
+  const qty = Math.max(1, Number(mpCantidad.value || 1));
+  const t = mpTipoPrecio.value;
+
+  let unit = 0;
+  if (t === "precioVendedor") {
+    unit = Number(mpPrecioValor.value || 0);
+  } else {
+    unit = Number(productoModal.precios?.[t] || 0);
+  }
+
+  const totalLinea = qty * unit;
+  mpTotalLinea.textContent = moneyL(totalLinea);
+}
+
+function confirmarAgregarProducto() {
+  if (!cotizacionActual || !productoModal) return;
+
+  const qty = Math.max(1, Number(mpCantidad.value || 1));
+  const priceType = mpTipoPrecio.value;
+  let customPrice = 0;
+
+  if (priceType === "precioVendedor") {
+    customPrice = Number(mpPrecioValor.value || 0);
+    if (customPrice <= 0) {
+      const ok = confirm("El PRECIO VENDEDOR está en 0. ¿Deseas agregar así?");
+      if (!ok) return;
+    }
+  }
+
+  cotAgregarLinea(productoModal.codigo, qty, priceType, customPrice);
+
+  cerrarModalProducto();
+  renderCotItems();
+}
+
+/* ================= ITEMS (permiten precios mezclados) ================= */
+function cotAgregarLinea(codigo, qty, priceType, customPrice) {
+  // Si ya existe MISMO producto y MISMO tipo (y mismo custom si aplica), sumamos cantidad
+  const match = cotizacionActual.items.find(it => {
+    if (it.codigo !== codigo) return false;
+    if (it.priceType !== priceType) return false;
+    if (priceType === "precioVendedor") {
+      return Number(it.customPrice || 0) === Number(customPrice || 0);
+    }
+    return true;
+  });
+
+  if (match) {
+    match.qty += qty;
+  } else {
+    cotizacionActual.items.push({
+      id: makeId(),
+      codigo,
+      qty,
+      priceType,
+      customPrice: priceType === "precioVendedor" ? Number(customPrice || 0) : 0
+    });
+  }
+}
+
+function cotFindItem(itemId) {
+  return cotizacionActual.items.find(x => String(x.id) === String(itemId));
+}
+
+function cotInc(itemId) {
+  const it = cotFindItem(itemId);
+  if (!it) return;
+  it.qty += 1;
+  renderCotItems();
+}
+
+function cotDec(itemId) {
+  const it = cotFindItem(itemId);
+  if (!it) return;
+  it.qty = Math.max(1, it.qty - 1);
+  renderCotItems();
+}
+
+function cotSetQty(itemId, val) {
+  const it = cotFindItem(itemId);
+  if (!it) return;
+  it.qty = Math.max(1, Number(val || 1));
+  renderCotItems();
+}
+
+function cotSetPriceType(itemId, newType) {
+  const it = cotFindItem(itemId);
+  if (!it) return;
+
+  it.priceType = newType;
+
+  if (newType === "precioVendedor") {
+    // poner precio manual por defecto: el precio público del producto (si existe)
+    const prod = catalogoMap.get(it.codigo);
+    const fallback = Number(prod?.precios?.precio || 0);
+    it.customPrice = Number(it.customPrice || fallback || 0);
+  } else {
+    it.customPrice = 0;
+  }
+
+  renderCotItems();
+}
+
+function cotSetCustomPrice(itemId, val) {
+  const it = cotFindItem(itemId);
+  if (!it) return;
+  it.customPrice = Number(val || 0);
+  renderCotItems();
+}
+
+function cotQuitar(itemId) {
+  cotizacionActual.items = cotizacionActual.items.filter(x => String(x.id) !== String(itemId));
+  renderCotItems();
+}
+
 function renderCotItems() {
   const cont = document.getElementById("cotItems");
+  const totalEl = document.getElementById("cotTotal");
+  if (!cont || !totalEl || !cotizacionActual) return;
 
   if (!cotizacionActual.items.length) {
     cont.innerHTML = `<div class="card"><strong>No hay productos agregados.</strong></div>`;
-    document.getElementById("cotTotal").textContent = moneyL(0);
+    totalEl.textContent = moneyL(0);
     return;
   }
 
@@ -523,19 +873,19 @@ function renderCotItems() {
 
   cont.innerHTML = cotizacionActual.items.map(it => {
     const prod = catalogoMap.get(it.codigo);
-    const precioUnit = getUnitPrice(prod, it);
+    const unit = getUnitPrice(prod, it);
     const qty = Number(it.qty || 0);
-    const sub = qty * precioUnit;
+    const sub = qty * unit;
     total += sub;
 
     const priceOptions = PRICE_TYPES.map(t => {
       const sel = (it.priceType === t) ? "selected" : "";
-      return `<option value="${t}" ${sel}>${PRICE_LABELS[t]}</option>`;
+      return `<option value="${t}" ${sel}>${escapeHtml(PRICE_LABELS[t])}</option>`;
     }).join("");
 
-    const extraPriceInput = it.priceType === "precioVendedor"
+    const customInput = it.priceType === "precioVendedor"
       ? `<input class="qty" type="number" step="0.01" min="0" value="${Number(it.customPrice || 0)}"
-           onchange="cotSetCustomPrice('${it.codigo}', this.value)" placeholder="Precio manual">`
+           onchange="cotSetCustomPrice(${it.id}, this.value)" />`
       : "";
 
     return `
@@ -543,96 +893,35 @@ function renderCotItems() {
         <div class="top">
           <div>
             <div class="name">${escapeHtml(trunc(prod?.producto || it.codigo, 60))}</div>
-            <div class="meta">Código: ${escapeHtml(it.codigo)} • Stock: ${prod?.stockTotal ?? "?"}</div>
+            <div class="meta">
+              Código: ${escapeHtml(it.codigo)} • Stock: ${prod ? prod.stockTotal : "?"}
+            </div>
           </div>
           <div style="font-weight:900;">${moneyL(sub)}</div>
         </div>
 
         <div class="controls">
-          <button type="button" class="inline secondary" onclick="cotDec('${it.codigo}')">-</button>
-          <input class="qty" type="number" min="1" value="${qty}"
-                 onchange="cotSetQty('${it.codigo}', this.value)" />
-          <button type="button" class="inline secondary" onclick="cotInc('${it.codigo}')">+</button>
+          <button type="button" class="inline secondary" onclick="cotDec(${it.id})">-</button>
+          <input class="qty" type="number" min="1" value="${qty}" onchange="cotSetQty(${it.id}, this.value)" />
+          <button type="button" class="inline secondary" onclick="cotInc(${it.id})">+</button>
 
-          <select class="inline" onchange="cotSetPriceType('${it.codigo}', this.value)">
+          <select class="inline" onchange="cotSetPriceType(${it.id}, this.value)">
             ${priceOptions}
           </select>
 
-          ${extraPriceInput}
+          ${customInput}
 
-          <button type="button" class="inline danger" onclick="cotQuitar('${it.codigo}')">✖ Quitar</button>
+          <button type="button" class="inline danger" onclick="cotQuitar(${it.id})">✖</button>
         </div>
 
         <div class="meta">
-          Tipo: <b>${PRICE_LABELS[it.priceType]}</b> • P.Unit: <b>${moneyL(precioUnit)}</b>
-          ${it.priceType === "precioVendedor" && precioUnit <= 0 ? " • ⚠️ Precio manual en 0" : ""}
+          Tipo: <b>${escapeHtml(PRICE_LABELS[it.priceType])}</b> • P.Unit: <b>${moneyL(unit)}</b>
         </div>
       </div>
     `;
   }).join("");
 
-  document.getElementById("cotTotal").textContent = moneyL(total);
-}
-
-/* ===== acciones items ===== */
-function cotAgregar(codigo) {
-  const idx = cotizacionActual.items.findIndex(x => x.codigo === codigo);
-  if (idx >= 0) {
-    cotizacionActual.items[idx].qty += 1;
-  } else {
-    const pt = cotizacionActual.defaultPriceType || "precio";
-    cotizacionActual.items.push({
-      codigo,
-      qty: 1,
-      priceType: pt,
-      customPrice: (pt === "precioVendedor") ? 0 : 0
-    });
-  }
-  renderCotItems();
-}
-
-function cotInc(codigo) {
-  const it = cotizacionActual.items.find(x => x.codigo === codigo);
-  if (!it) return;
-  it.qty += 1;
-  renderCotItems();
-}
-
-function cotDec(codigo) {
-  const it = cotizacionActual.items.find(x => x.codigo === codigo);
-  if (!it) return;
-  it.qty = Math.max(1, it.qty - 1);
-  renderCotItems();
-}
-
-function cotSetQty(codigo, val) {
-  const it = cotizacionActual.items.find(x => x.codigo === codigo);
-  if (!it) return;
-  it.qty = Math.max(1, Number(val || 1));
-  renderCotItems();
-}
-
-function cotSetPriceType(codigo, priceType) {
-  const it = cotizacionActual.items.find(x => x.codigo === codigo);
-  if (!it) return;
-  it.priceType = priceType;
-  // si cambia a precio vendedor, mantener customPrice (si no existe, poner 0)
-  if (priceType === "precioVendedor" && (it.customPrice === undefined || it.customPrice === null)) {
-    it.customPrice = 0;
-  }
-  renderCotItems();
-}
-
-function cotSetCustomPrice(codigo, val) {
-  const it = cotizacionActual.items.find(x => x.codigo === codigo);
-  if (!it) return;
-  it.customPrice = Number(val || 0);
-  renderCotItems();
-}
-
-function cotQuitar(codigo) {
-  cotizacionActual.items = cotizacionActual.items.filter(x => x.codigo !== codigo);
-  renderCotItems();
+  totalEl.textContent = moneyL(total);
 }
 
 /* ================= SNAPSHOT (guardar / PDF) ================= */
@@ -670,7 +959,7 @@ function buildCotizacionSnapshot() {
     } : null,
     items,
     total,
-    disclaimer: "ESTE DOCUMENTO ES SOLO UNA COTIZACIÓN Y NO TIENE VALIDEZ FISCAL"
+    disclaimer: "ESTE DOCUMENTO ES SOLO UNA COTIZACIÓN Y NO TIENE NINGUNA VALIDEZ / VALIDEZ FISCAL"
   };
 }
 
@@ -680,12 +969,12 @@ function guardarCotizacion(skipNameCheck = false) {
     if (!ensureNombreVendedor({ type: "cot_guardar" })) return;
   }
 
-  if (!cotizacionActual.items.length) {
+  if (!cotizacionActual?.items?.length) {
     alert("Agrega al menos un producto a la cotización.");
     return;
   }
 
-  // validar precio vendedor > 0
+  // Validar precio vendedor (si aplica)
   const badManual = cotizacionActual.items.some(it => it.priceType === "precioVendedor" && Number(it.customPrice || 0) <= 0);
   if (badManual) {
     const ok = confirm("Hay productos con PRECIO VENDEDOR en 0. ¿Deseas guardar así?");
@@ -705,30 +994,31 @@ function generarPdfCotizacion(skipNameCheck = false) {
     if (!ensureNombreVendedor({ type: "cot_pdf" })) return;
   }
 
-  if (!cotizacionActual.items.length) {
+  if (!cotizacionActual?.items?.length) {
     alert("Agrega productos primero.");
     return;
   }
 
   const snap = buildCotizacionSnapshot();
-  crearPdfCotizacion(snap);
+  crearPdfCotizacion(snap, () => renderCotizacionUI());
 }
 
 function estimateHeightMM(cot) {
-  // Estimación para ticket 80mm: encabezado+cliente+footer ~ 90
-  // Cada item: 12-20mm dependiendo del nombre; hacemos aproximación segura.
-  let h = 105;
-  h += cot.cliente ? 18 : 8;
+  // Ticket 80mm: base aproximada
+  let h = 110; // encabezado + cliente
+  h += cot.cliente ? 14 : 8;
+
   cot.items.forEach(it => {
     const nameLen = (it.producto || "").length;
-    const lines = Math.max(1, Math.ceil(nameLen / 28)); // aprox
-    h += 10 + (lines * 4.2); // item block
+    const lines = Math.max(1, Math.ceil(nameLen / 28));
+    h += 10 + (lines * 4.2) + 6; // bloque item
   });
-  h += 28; // total + disclaimer
-  return Math.max(160, Math.ceil(h));
+
+  h += 30; // total + disclaimer
+  return Math.max(170, Math.ceil(h));
 }
 
-async function crearPdfCotizacion(cot) {
+async function crearPdfCotizacion(cot, backFn) {
   const { jsPDF, GState } = window.jspdf || {};
   if (!jsPDF) {
     alert("No se encontró jsPDF. Revisa la conexión o el script en index.html.");
@@ -739,7 +1029,7 @@ async function crearPdfCotizacion(cot) {
   const doc = new jsPDF({
     orientation: "portrait",
     unit: "mm",
-    format: [80, height] // ticket angosto
+    format: [80, height]
   });
 
   const left = 4;
@@ -749,7 +1039,6 @@ async function crearPdfCotizacion(cot) {
   // Logo
   try {
     const logoDataUrl = await getLogoDataUrl();
-    // ancho 46mm, alto 18mm aprox
     doc.addImage(logoDataUrl, "PNG", 17, y, 46, 18);
   } catch (e) {
     // si falla, seguimos sin logo
@@ -757,6 +1046,7 @@ async function crearPdfCotizacion(cot) {
 
   y += 24;
 
+  // Encabezado
   doc.setTextColor(36, 58, 143);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
@@ -778,17 +1068,13 @@ async function crearPdfCotizacion(cot) {
   doc.line(left, y, right, y);
 
   // Marca de agua
-  y += 8;
-  try {
-    if (GState) doc.setGState(new GState({ opacity: 0.12 }));
-  } catch {}
+  y += 7;
+  try { if (GState) doc.setGState(new GState({ opacity: 0.12 })); } catch {}
   doc.setTextColor(156, 163, 175);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
   doc.text("SOLO COTIZACIÓN", 40, y + 18, { align: "center", angle: 45 });
-  try {
-    if (GState) doc.setGState(new GState({ opacity: 1 }));
-  } catch {}
+  try { if (GState) doc.setGState(new GState({ opacity: 1 })); } catch {}
 
   // Cliente
   doc.setTextColor(31, 41, 55);
@@ -808,38 +1094,34 @@ async function crearPdfCotizacion(cot) {
 
   y += 6;
   clienteLines.forEach(line => {
-    doc.text(line, left, y);
-    y += 4.2;
+    const lines = doc.splitTextToSize(line, 72);
+    doc.text(lines, left, y);
+    y += lines.length * 4.2;
   });
 
   y += 1;
   doc.line(left, y, right, y);
 
-  // Items
+  // Detalle
   y += 6;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.text("DETALLE", left, y);
 
   y += 5;
-
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
 
-  cot.items.forEach((it, idx) => {
-    // 1) Cantidad x Código
+  cot.items.forEach((it) => {
     doc.setFont("helvetica", "bold");
     doc.text(`${it.cantidad} x ${it.codigo}`, left, y);
     y += 4.2;
 
-    // 2) Producto (wrap)
     doc.setFont("helvetica", "normal");
-    const name = it.producto || "";
-    const nameLines = doc.splitTextToSize(name, 72);
+    const nameLines = doc.splitTextToSize(it.producto || "", 72);
     doc.text(nameLines, left, y);
     y += nameLines.length * 4.2;
 
-    // 3) Tipo + unit + subtotal
     doc.setTextColor(107, 114, 128);
     doc.text(`Tipo: ${it.tipoPrecioLabel}`, left, y);
     y += 4.2;
@@ -867,18 +1149,18 @@ async function crearPdfCotizacion(cot) {
   const discLines = doc.splitTextToSize(cot.disclaimer, 72);
   doc.text(discLines, 40, y, { align: "center" });
 
-  // Blob PDF
+  // Generar blob y mostrar
   const blob = doc.output("blob");
-  setLastFile(blob, `cotizacion-${cot.id}.pdf`, "application/pdf", "Cotización - Ferretería Universal", "Cotización sin validez fiscal");
+  setLastFile(blob, `cotizacion-${cot.id}.pdf`, "application/pdf",
+    "Cotización - Ferretería Universal",
+    "Documento solo para cotización, sin validez");
 
-  mostrarPdfEnPantalla();
+  mostrarPdfEnPantalla(backFn);
 }
 
 function setLastFile(blob, filename, mime, title, text) {
-  // limpiar URL anterior
-  if (lastFile.url) {
-    URL.revokeObjectURL(lastFile.url);
-  }
+  if (lastFile.url) URL.revokeObjectURL(lastFile.url);
+
   lastFile.blob = blob;
   lastFile.url = URL.createObjectURL(blob);
   lastFile.filename = filename;
@@ -887,12 +1169,15 @@ function setLastFile(blob, filename, mime, title, text) {
   lastFile.text = text || "";
 }
 
-function mostrarPdfEnPantalla() {
+function mostrarPdfEnPantalla(backFn) {
+  // Guardamos callback en window para usarlo desde HTML inline
+  window.__backFromPdf = typeof backFn === "function" ? backFn : volverHome;
+
   contenido.classList.remove("hidden");
   vendedorHome.classList.add("hidden");
 
   contenido.innerHTML = `
-    <button type="button" class="secondary" onclick="abrirCotizacion()">⬅ Volver</button>
+    <button type="button" class="secondary" onclick="window.__backFromPdf()">⬅ Volver</button>
 
     <div class="card">
       <strong>📄 PDF generado</strong>
@@ -964,11 +1249,12 @@ function abrirHistorialCotizaciones() {
 
     ${cotizaciones.slice(0, 60).map(c => `
       <div class="card" onclick="verCotizacionGuardada(${c.id})">
-        <strong>🧾 #${c.id} • ${moneyL(c.total)}</strong>
-        <div style="color:#6B7280; font-size:12px;">
-          ${escapeHtml(c.fecha)} • ${c.cliente?.nombre ? `Cliente: ${escapeHtml(c.cliente.nombre)}` : "Sin cliente"}
+        <strong>🧾 #${c.id} • ${escapeHtml(moneyL(c.total))}</strong>
+        <div class="note">
+          ${escapeHtml(c.fecha)}<br>
+          ${c.cliente?.nombre ? `Cliente: <b>${escapeHtml(c.cliente.nombre)}</b>` : "Sin cliente"}
         </div>
-        <div style="margin-top:8px;"><span class="badge">Tocar para generar PDF</span></div>
+        <span class="badge">Generar PDF</span>
       </div>
     `).join("")}
   `;
@@ -977,5 +1263,7 @@ function abrirHistorialCotizaciones() {
 function verCotizacionGuardada(id) {
   const c = cotizaciones.find(x => x.id === id);
   if (!c) return;
-  crearPdfCotizacion(c);
+
+  // Generar PDF de una cotización guardada (sin depender del catálogo)
+  crearPdfCotizacion(c, () => abrirHistorialCotizaciones());
 }
