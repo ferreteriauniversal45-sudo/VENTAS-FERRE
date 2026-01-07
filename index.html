@@ -11,7 +11,6 @@
 <!-- ================= LOGIN ================= -->
 <div id="login" class="login-bg">
   <div class="login-card">
-
     <img
       src="https://raw.githubusercontent.com/ferreteriauniversal45-sudo/ferreteria-inventario-app/main/logo.png"
       alt="Ferretería Universal"
@@ -33,7 +32,6 @@
       <button type="button" class="secondary" onclick="resetLogin()">⬅ Cambiar rol</button>
       <div id="pinError" class="pin-error hidden">❌ PIN incorrecto</div>
     </div>
-
   </div>
 </div>
 
@@ -56,58 +54,55 @@
   </header>
 
   <main>
-    <!-- HOME VENDEDOR -->
     <div id="vendedorHome" class="hidden">
       <button type="button" onclick="abrirCotizacion()">🧾 Nueva Cotización</button>
       <button type="button" onclick="abrirClientes()">👤 Clientes</button>
       <button type="button" class="secondary" onclick="abrirHistorialCotizaciones()">📑 Cotizaciones guardadas</button>
     </div>
 
-    <!-- CONTENIDO DINÁMICO -->
     <div id="contenido" class="hidden"></div>
   </main>
 </div>
 
-<!-- ================= MODAL NOMBRE VENDEDOR ================= -->
+<!-- ================= MODAL: NOMBRE VENDEDOR ================= -->
 <div id="modalVendedor" class="modal">
   <div class="modal-card">
     <img
       src="https://raw.githubusercontent.com/ferreteriauniversal45-sudo/ferreteria-inventario-app/main/logo.png"
-      class="logo-login"
+      class="logo-login small-logo"
       alt="Ferretería Universal"
     />
     <h3>Nombre del vendedor</h3>
-    <p class="note">Se usará en las cotizaciones (PDF)</p>
+    <p class="muted">Se usará en las cotizaciones (solo se pide una vez).</p>
 
     <input id="nombreVendedorInput" placeholder="Ej: Juan Pérez" />
 
-    <button type="button" onclick="guardarNombreVendedor()">Guardar</button>
-    <button type="button" class="secondary" onclick="cerrarModalVendedor()">Cancelar</button>
+    <div class="btn-row">
+      <button type="button" onclick="guardarNombreVendedor()">Guardar</button>
+      <button type="button" class="secondary" onclick="cerrarModalVendedor()">Cancelar</button>
+    </div>
   </div>
 </div>
 
-<!-- ================= MODAL CLIENTES (SELECCIONAR / BUSCAR) ================= -->
+<!-- ================= MODAL: SELECCIONAR CLIENTE ================= -->
 <div id="modalClientes" class="modal">
   <div class="modal-card">
     <h3>Seleccionar cliente</h3>
-    <p class="note">Busca por nombre o empresa, o crea uno nuevo.</p>
+    <input id="buscarClienteModal" placeholder="🔍 Buscar por nombre o empresa" />
+    <div id="listaClientesModal" class="modal-list"></div>
 
-    <input id="buscarClienteInput" placeholder="🔍 Buscar cliente..." />
-
-    <div id="listaClientesModal" class="list-scroll"></div>
-
-    <hr />
-
-    <button type="button" onclick="abrirModalNuevoCliente()">➕ Agregar cliente nuevo</button>
-    <button type="button" class="secondary" onclick="cerrarModalClientes()">Cancelar</button>
+    <div class="btn-row">
+      <button type="button" onclick="abrirModalNuevoClienteDesdeCot()">➕ Nuevo cliente</button>
+      <button type="button" class="secondary" onclick="cerrarModalClientes()">Cancelar</button>
+    </div>
   </div>
 </div>
 
-<!-- ================= MODAL NUEVO CLIENTE ================= -->
+<!-- ================= MODAL: NUEVO CLIENTE (DESDE COTIZACIÓN) ================= -->
 <div id="modalNuevoCliente" class="modal">
   <div class="modal-card">
     <h3>Nuevo cliente</h3>
-    <p class="note">Todos los campos son opcionales.</p>
+    <p class="muted">Todos los campos son opcionales. Se guarda localmente.</p>
 
     <input id="ncNombre" placeholder="Nombre del cliente" />
     <input id="ncEmpresa" placeholder="Empresa" />
@@ -115,43 +110,55 @@
     <input id="ncRTN" placeholder="RTN" />
     <input id="ncUbicacion" placeholder="Ubicación" />
 
-    <button type="button" onclick="guardarClienteDesdeModal()">Guardar cliente</button>
-    <button type="button" class="secondary" onclick="cerrarModalNuevoCliente(true)">Cancelar</button>
+    <div class="btn-row">
+      <button type="button" onclick="guardarNuevoClienteModal()">Guardar</button>
+      <button type="button" class="secondary" onclick="cerrarModalNuevoCliente()">Cancelar</button>
+    </div>
   </div>
 </div>
 
-<!-- ================= MODAL PRODUCTO (CANTIDAD + PRECIO) ================= -->
-<div id="modalProducto" class="modal">
+<!-- ================= MODAL: BUSCAR PRODUCTOS ================= -->
+<div id="modalProductos" class="modal">
   <div class="modal-card">
-    <h3 id="mpNombre">Producto</h3>
-    <div id="mpMeta" class="note"></div>
+    <h3>Buscar producto</h3>
+    <input id="buscarProductoModal" placeholder="🔍 Buscar por código o nombre" />
+    <div id="listaProductosModal" class="modal-list"></div>
 
-    <div id="mpListaPrecios" class="price-table"></div>
+    <div class="btn-row">
+      <button type="button" class="secondary" onclick="cerrarModalProductos()">Cerrar</button>
+    </div>
+  </div>
+</div>
 
-    <label><b>Cantidad</b></label>
-    <input id="mpCantidad" type="number" min="1" value="1" />
+<!-- ================= MODAL: AGREGAR PRODUCTO (CANTIDAD + PRECIO) ================= -->
+<div id="modalAgregarProducto" class="modal">
+  <div class="modal-card">
+    <h3 id="apTitulo">Producto</h3>
+    <p id="apSub" class="muted"></p>
 
-    <label><b>Tipo de precio</b></label>
-    <select id="mpTipoPrecio"></select>
-
-    <div id="mpPrecioManualWrap" class="hidden">
-      <label><b>PRECIO VENDEDOR</b></label>
-      <input id="mpPrecioValor" type="number" min="0" step="0.01" placeholder="Ej: 1250.00" />
+    <div class="card-lite">
+      <div id="apListaPrecios" class="prices-list"></div>
     </div>
 
-    <div class="total-box small-total">
-      <span>Total línea</span>
-      <span id="mpTotalLinea">L. 0.00</span>
+    <label class="label">Cantidad</label>
+    <input id="apCantidad" type="number" min="1" value="1" />
+
+    <label class="label">Tipo de precio</label>
+    <select id="apTipoPrecio"></select>
+
+    <div id="apPrecioManualWrap" class="hidden">
+      <label class="label">PRECIO VENDEDOR (manual)</label>
+      <input id="apPrecioManual" type="number" step="0.01" min="0" placeholder="Ej: 250.00" />
     </div>
 
     <div class="btn-row">
       <button type="button" onclick="confirmarAgregarProducto()">Agregar</button>
-      <button type="button" class="secondary" onclick="cerrarModalProducto()">Cancelar</button>
+      <button type="button" class="secondary" onclick="cerrarModalAgregarProducto()">Cancelar</button>
     </div>
   </div>
 </div>
 
-<!-- jsPDF (CDN) -->
+<!-- jsPDF -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <script src="app.js"></script>
