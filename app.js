@@ -1058,6 +1058,20 @@ async function crearPdfCotizacion(cot){
 
   mostrarPdfPreview();
 }
+async function enviarPdfAAndroidParaCompartir(blob, filename) {
+  if (!window.Android || !window.Android.guardarPdfBase64) {
+    alert("Compartir no disponible en este dispositivo");
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onloadend = function () {
+    const base64data = reader.result.split(",")[1]; // quitamos data:application/pdf;base64,
+    window.Android.guardarPdfBase64(base64data, filename);
+  };
+  reader.readAsDataURL(blob);
+}
+
 
 function mostrarPdfPreview(){
   contenido.classList.remove("hidden");
@@ -1083,31 +1097,42 @@ function mostrarPdfPreview(){
 }
 
 function compartirArchivo() {
-  if (!lastFile || !lastFile.url) {
+  if (!lastFile || !lastFile.blob) {
     alert("No hay archivo para compartir");
     return;
   }
 
-  // Si estamos en APK (WebView Android)
-  if (window.Android && typeof window.Android.compartirPdfDesdeAndroid === "function") {
-    window.Android.compartirPdfDesdeAndroid(lastFile.url);
+  // APK Android (forma correcta)
+  if (window.Android && typeof window.Android.guardarPdfBase64 === "function") {
+    enviarPdfAAndroidParaCompartir(lastFile.blob, lastFile.filename);
     return;
   }
 
-  // En web normal (navegador)
+  // Web normal
   window.open(lastFile.url, "_blank");
 }
 
 
-function descargarArchivo(){
-  if (!lastFile.url) return;
+
+function descargarArchivo() {
+  if (!lastFile || !lastFile.blob) {
+    alert("No hay archivo para descargar");
+    return;
+  }
+
+  // Android
+  if (window.Android && typeof window.Android.guardarPdfBase64 === "function") {
+    enviarPdfAAndroidParaCompartir(lastFile.blob, lastFile.filename);
+    return;
+  }
+
+  // Web
   const a = document.createElement("a");
   a.href = lastFile.url;
   a.download = lastFile.filename;
-  document.body.appendChild(a);
   a.click();
-  a.remove();
 }
+
 
 /* ================= HISTORIAL ================= */
 function abrirHistorialCotizaciones(){
