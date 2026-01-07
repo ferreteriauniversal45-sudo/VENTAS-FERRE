@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ferretería Universal - Cotizaciones</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ================= LOGIN ================= -->
+<div id="login" class="login-bg">
+  <div class="login-card">
+
+    <img
+      src="https://raw.githubusercontent.com/ferreteriauniversal45-sudo/ferreteria-inventario-app/main/logo.png"
+      alt="Ferretería Universal"
+      class="logo-login"
+    />
+
+    <h1>Acceso</h1>
+    <p id="roleText">Selecciona un rol</p>
+
+    <div id="roles">
+      <button type="button" onclick="selectRole('OPERADOR')">👷 OPERADOR</button>
+      <button type="button" onclick="selectRole('VENDEDOR')">🧾 VENDEDOR</button>
+      <button type="button" onclick="selectRole('ADMIN')">⚙️ ADMINISTRADOR</button>
+    </div>
+
+    <div id="pinBox" class="hidden">
+      <input type="password" id="pin" placeholder="Ingresa tu PIN" />
+      <button type="button" onclick="validatePin()">Entrar</button>
+      <button type="button" class="secondary" onclick="resetLogin()">⬅ Cambiar rol</button>
+      <div id="pinError" class="pin-error hidden">❌ PIN incorrecto</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ================= APP ================= -->
+<div id="app" class="hidden">
+  <header class="app-header">
+    <div class="header-left">
+      <img
+        src="https://raw.githubusercontent.com/ferreteriauniversal45-sudo/ferreteria-inventario-app/main/logo.png"
+        class="logo-header"
+        alt="Ferretería Universal"
+      />
+      <div class="header-text">
+        <h1 id="headerTitle">Cotizaciones</h1>
+        <small id="headerSubtitle">Ferretería Universal</small>
+      </div>
+    </div>
+
+    <button class="danger small" type="button" onclick="logout()">Salir</button>
+  </header>
+
+  <main>
+    <!-- HOME VENDEDOR -->
+    <div id="vendedorHome" class="hidden">
+      <button type="button" onclick="abrirCotizacion()">🧾 Nueva Cotización</button>
+      <button type="button" onclick="abrirClientes()">👤 Clientes</button>
+      <button type="button" class="secondary" onclick="abrirHistorialCotizaciones()">📑 Cotizaciones guardadas</button>
+    </div>
+
+    <!-- CONTENIDO DINÁMICO -->
+    <div id="contenido" class="hidden"></div>
+  </main>
+</div>
+
+<!-- ================= MODAL NOMBRE VENDEDOR ================= -->
+<div id="modalVendedor" class="modal">
+  <div class="modal-card">
+    <img
+      src="https://raw.githubusercontent.com/ferreteriauniversal45-sudo/ferreteria-inventario-app/main/logo.png"
+      class="logo-login"
+      alt="Ferretería Universal"
+    />
+    <h3>Nombre del vendedor</h3>
+    <p>Se usará en cotizaciones y documentos</p>
+
+    <input id="nombreVendedorInput" placeholder="Ej: Juan Pérez" />
+
+    <button type="button" onclick="guardarNombreVendedor()">Guardar</button>
+    <button type="button" class="secondary" onclick="cerrarModalVendedor()">Cancelar</button>
+  </div>
+</div>
+
+<!-- jsPDF (CDN) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<script src="app.js"></script>
+</body>
+</html>
