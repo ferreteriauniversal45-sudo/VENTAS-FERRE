@@ -6,7 +6,7 @@ const URLS = {
   invA: BASE_RAW + "inventarioanexo.json",
   precios: BASE_RAW + "precios.json",
 };
-const EMPRESA_RTN = "0301-1964-008634"
+
 const PINS = {
   OPERADOR: "CONTROL2025",
   VENDEDOR: "VENTAS2026",
@@ -21,14 +21,6 @@ const PRICE_LABELS = {
   precioC: "Precio C",
   mayoreo: "Mayoreo",
   precioVendedor: "PRECIO VENDEDOR"
-};
-const PRICE_CODE_LETTER = {
-  precio: "P",
-  precioA: "A",
-  precioB: "B",
-  precioC: "C",
-  mayoreo: "M",
-  precioVendedor: "V"
 };
 
 /* ================= HELPERS ================= */
@@ -932,7 +924,7 @@ async function crearPdfCotizacion(cot){
     watermark();
 
     if (isFirst && logoDataUrl) {
-      doc.addImage(logoDataUrl, "PNG", 30, y, 20, 18);
+      doc.addImage(logoDataUrl, "PNG", 17, y, 46, 18);
       y += 22;
     }
 
@@ -941,11 +933,6 @@ async function crearPdfCotizacion(cot){
     doc.setFontSize(12);
     doc.text("FERRETERÍA UNIVERSAL", 40, y, { align: "center" });
     y += 6;
-    doc.setfocus("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.setTextColor(31, 41, 55);
-    doc.text(`RTN: ${EMPRESA_RTN}`, 40, y, { align: "center" });
-    y += 5;
 
     doc.setTextColor(31, 41, 55);
     doc.setFont("helvetica", "normal");
@@ -1029,12 +1016,7 @@ async function crearPdfCotizacion(cot){
     ensureSpace(mmNeeded);
 
     doc.setFont("helvetica", "bold");
-    const letraPrecio = PRICE_CODE_LETTER[it.tipoPrecio] || "";
-    const codigoConTipo = `${it.codigo}-${letraPrecio}`;
-    doc.setFont("helvetica", "bold");
-    doc.text(`${it.cantidad} x ${codigoConTipo}`, marginL, y);
-    doc.text(`${moneyL(it.subtotal)}`, marginR, y, { align: "right" });
-    y += lineH;
+    doc.text(`${it.cantidad} x ${it.codigo}`, marginL, y);
     doc.text(`${moneyL(it.subtotal)}`, marginR, y, { align: "right" });
     y += lineH;
 
@@ -1042,6 +1024,9 @@ async function crearPdfCotizacion(cot){
     doc.text(nameLines, marginL, y);
     y += nameLines.length * lineH;
 
+    doc.setTextColor(107, 114, 128);
+    doc.text(`Tipo: ${it.tipoPrecioLabel}`, marginL, y);
+    y += lineH;
 
     doc.setTextColor(31, 41, 55);
     doc.text(`P.Unit: ${moneyL(it.precioUnitario)}`, marginL, y);
