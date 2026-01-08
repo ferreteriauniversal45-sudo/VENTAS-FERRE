@@ -157,7 +157,18 @@
     </div>
   </div>
 </div>
+<!-- ================= MODAL: ERROR DE PRECIO ================= -->
+<div id="modalErrorPrecio" class="modal">
+  <div class="modal-card">
+    <h3>⚠️ Precio No Permitido</h3>
+    <p id="errorMensaje" class="muted">El precio ingresado es menor al costo permitido.</p>
+    <p id="errorMinimo">Precio mínimo: L. 0.00</p>
 
+    <div class="btn-row">
+      <button type="button" onclick="cerrarModalErrorPrecio()">Entendido</button>
+    </div>
+  </div>
+</div>
 <!-- jsPDF -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
