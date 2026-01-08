@@ -212,12 +212,11 @@ function ensureNombreVendedor(actionObj){
 async function ensureCatalogoCargado(){
   if (catalogoCargado) return;
 
-  // ✅ Corregido: 4 fetches, 4 variables
-  const [invP, invA, precios, preciosadmin] = await Promise.all([
+  // ✅ Cambiado: Quita fetch de precios.json, usa solo preciosadmin para precios públicos
+  const [invP, invA, preciosadmin] = await Promise.all([
     fetchJson(URLS.invP),
     fetchJson(URLS.invA),
-    fetchJson(URLS.precios),
-    fetchJson(URLS.preciosadmin)  // ✅ Agregado
+    fetchJson(URLS.preciosadmin)  // ✅ Ahora solo este para precios
   ]);
 
   catalogo = [];
@@ -226,18 +225,24 @@ async function ensureCatalogoCargado(){
   for (const codigo in invP) {
     const p = invP[codigo];
     const a = invA[codigo] || { cantidad: 0 };
-    const pr = precios[codigo] || {};
-    const admin = preciosadmin[codigo] || {};  // ✅ Ahora preciosadmin está definido
+    const data = preciosadmin[codigo] || {};  // ✅ Usa preciosadmin para todo
 
     const obj = {
       codigo,
       producto: p.producto || "",
       departamento: p.departamento || "",
       stockTotal: Number(p.cantidad || 0) + Number(a.cantidad || 0),
-      precios: pr,
-      admin: {
-        costo: Number(admin.costo || 0),
-        limite: Number(admin.limite || 1)
+      precios: {  // ✅ Extrae precios públicos de data (preciosadmin)
+        precio: data.precio,
+        precioA: data.precioA,
+        precioB: data.precioB,
+        precioC: data.precioC,
+        mayoreo: data.mayoreo,
+        precioVendedor: data.precioVendedor || 0  // Si aplica
+      },
+      admin: {  // ✅ Extrae datos admin del mismo data
+        costo: Number(data.costo || 0),
+        limite: Number(data.limite || 1)
       }
     };
 
@@ -248,23 +253,6 @@ async function ensureCatalogoCargado(){
   catalogo.sort((x,y) => (x.producto||"").localeCompare(y.producto||"", "es"));
   catalogoCargado = true;
 }
-
-/* ================= ... (resto del código) ================= */
-
-function getUnitPrice(prod, item){
-  if (!prod) return 0;
-
-  if (item.priceType === "precioVendedor") {
-    return Number(item.customPrice || 0);
-  }
-
-  const val = prod.precios?.[item.priceType];
-  if (val !== undefined && val !== null) return Number(val || 0);  // ✅ Corregido: agregado "undefined"
-
-  // fallback
-  return Number(prod.precios?.precio || 0);
-}
-
 /* ================= CLIENTES (pantalla normal) ================= */
 function abrirClientes() {
   vendedorHome.classList.add("hidden");
