@@ -5,8 +5,8 @@ const URLS = {
   invP: BASE_RAW + "inventario.json",
   invA: BASE_RAW + "inventarioanexo.json",
   precios: BASE_RAW + "precios.json",
+  preciosadmin: BASE_RAW + "preciosadmin.json" 
 };
-
 const PINS = {
   OPERADOR: "CONTROL2025",
   VENDEDOR: "VENTAS2026",
@@ -212,10 +212,12 @@ function ensureNombreVendedor(actionObj){
 async function ensureCatalogoCargado(){
   if (catalogoCargado) return;
 
-  const [invP, invA, precios] = await Promise.all([
+  // ✅ Corregido: 4 fetches, 4 variables
+  const [invP, invA, precios, preciosadmin] = await Promise.all([
     fetchJson(URLS.invP),
     fetchJson(URLS.invA),
     fetchJson(URLS.precios),
+    fetchJson(URLS.preciosadmin)  // ✅ Agregado
   ]);
 
   catalogo = [];
@@ -225,13 +227,18 @@ async function ensureCatalogoCargado(){
     const p = invP[codigo];
     const a = invA[codigo] || { cantidad: 0 };
     const pr = precios[codigo] || {};
+    const admin = preciosadmin[codigo] || {};  // ✅ Ahora preciosadmin está definido
 
     const obj = {
       codigo,
       producto: p.producto || "",
       departamento: p.departamento || "",
       stockTotal: Number(p.cantidad || 0) + Number(a.cantidad || 0),
-      precios: pr
+      precios: pr,
+      admin: {
+        costo: Number(admin.costo || 0),
+        limite: Number(admin.limite || 1)
+      }
     };
 
     catalogo.push(obj);
@@ -240,6 +247,22 @@ async function ensureCatalogoCargado(){
 
   catalogo.sort((x,y) => (x.producto||"").localeCompare(y.producto||"", "es"));
   catalogoCargado = true;
+}
+
+/* ================= ... (resto del código) ================= */
+
+function getUnitPrice(prod, item){
+  if (!prod) return 0;
+
+  if (item.priceType === "precioVendedor") {
+    return Number(item.customPrice || 0);
+  }
+
+  const val = prod.precios?.[item.priceType];
+  if (val !== undefined && val !== null) return Number(val || 0);  // ✅ Corregido: agregado "undefined"
+
+  // fallback
+  return Number(prod.precios?.precio || 0);
 }
 
 /* ================= CLIENTES (pantalla normal) ================= */
@@ -731,11 +754,24 @@ function abrirModalAgregarProducto(codigo){
   openModal("modalAgregarProducto");
 }
 
+function precioMinimoPermitido(prod) {
+   if (!prod || !prod.admin) return 0;
+    return Number(prod.admin.limite || 0)
+}
+
 function cerrarModalAgregarProducto(){
   closeModal("modalAgregarProducto");
   selectedProductCode = null;
 }
+function mostrarModalErrorPrecio(minimo){
+  el("errorMensaje").textContent = "El precio ingresado es menor al costo permitido.";
+  el("errorMinimo").textContent = `Precio mínimo: ${moneyL(minimo)}`;
+  openModal("modalErrorPrecio");
+}
 
+function cerrarModalErrorPrecio(){
+  closeModal("modalErrorPrecio");
+}
 el("apTipoPrecio")?.addEventListener("change", () => {
   const type = el("apTipoPrecio").value;
   if (type === "precioVendedor") {
@@ -755,9 +791,18 @@ function confirmarAgregarProducto(){
   let customPrice = 0;
 
   if (priceType === "precioVendedor") {
-    customPrice = Number(el("apPrecioManual").value || 0);
+    customPrice = Number(el("apPrecioManual")?.value || 0);
+
     if (customPrice <= 0) {
-      alert("Ingresa un PRECIO VENDEDOR válido.");
+      alert("Ingresa un precio valido.");
+      return;
+    }
+
+    const minimo = precioMinimoPermitido(prod);
+
+    if (minimo > 0 && customPrice < minimo) {
+      // ✅ Reemplaza el alert con el modal bonito
+      mostrarModalErrorPrecio(minimo);
       return;
     }
   }
@@ -1214,4 +1259,4 @@ function whatsappCliente(telefono) {
   // Honduras: 504
   const url = `https://wa.me/504${num}`;
   window.open(url, "_blank");
-}
+}       
