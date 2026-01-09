@@ -5,7 +5,8 @@ const URLS = {
   invP: BASE_RAW + "inventario.json",
   invA: BASE_RAW + "inventarioanexo.json",
   precios: BASE_RAW + "precios.json",
-  preciosadmin: BASE_RAW + "preciosadmin.json" 
+  preciosadmin: BASE_RAW + "preciosadmin.json",
+  version: BASE_RAW + "inventario_version.json"  
 };
 const PINS = {
   OPERADOR: "CONTROL2025",
@@ -84,6 +85,9 @@ let selectedProductCode = null;
 let lastFile = { blob:null, url:null, filename:"cotizacion.pdf", mime:"application/pdf", title:"", text:"" };
 let logoDataUrlCache = null;
 
+let inventarioVersion = localStorage.getItem("inventarioVersion") || "0";  // ✅ Versión almacenada
+let inventarioAdmin = [];  // ✅ Datos para ADMIN: [{codigo, producto, stockP, stockA, precios, admin}]
+
 /* ================= ELEMENTS ================= */
 const loginScreen = el("login");
 const appScreen = el("app");
@@ -99,8 +103,12 @@ const contenido = el("contenido");
 const headerTitle = el("headerTitle");
 
 /* ================= INIT ================= */
-if (localStorage.getItem("role")) startApp();
-
+async function initApp() {
+  // ✅ Cargar versión al inicio
+  await checkVersionAndReload();
+  if (localStorage.getItem("role")) startApp();
+}
+initApp();  // ✅ Llamar al inicio
 /* ================= LOGIN ================= */
 function selectRole(role){
   selectedRole = role;
@@ -152,13 +160,16 @@ function startApp(){
   if (role === "VENDEDOR") {
     headerTitle.textContent = "Cotizaciones";
     vendedorHome.classList.remove("hidden");
+  } else if (role === "ADMIN") {
+    headerTitle.textContent = "Inventario Admin";
+    abrirInventarioAdmin();
   } else {
     contenido.classList.remove("hidden");
     contenido.innerHTML = `
       <div class="card">
         <strong>⚠️ Rol no implementado</strong>
         <div style="color:#6B7280; margin-top:6px;">
-          Actualmente este módulo está listo para <b>VENDEDOR</b>.
+          Actualmente este módulo está listo para <b>VENDEDOR</b> y <b>ADMIN</b>.
         </div>
       </div>
     `;
@@ -170,6 +181,23 @@ function logout(){
   localStorage.removeItem("role");
   location.reload();
 }
+/* ================= VERSION CHECK ================= */
+async function checkVersionAndReload() {
+  try {
+    const versionData = await fetchJson(URLS.version);
+    const newVersion = versionData.version || "0";
+    if (newVersion !== inventarioVersion) {
+      inventarioVersion = newVersion;
+      localStorage.setItem("inventarioVersion", inventarioVersion);
+      // ✅ Forzar recarga del catálogo si cambió la versión
+      catalogoCargado = false;
+      inventarioAdmin = [];
+    }
+  } catch (err) {
+    console.warn("No se pudo cargar versión:", err);
+  }
+}
+
 
 /* ================= MODAL VENDEDOR ================= */
 function abrirModalVendedor(){
@@ -212,35 +240,37 @@ function ensureNombreVendedor(actionObj){
 async function ensureCatalogoCargado(){
   if (catalogoCargado) return;
 
-  // ✅ Cambiado: Quita fetch de precios.json, usa solo preciosadmin para precios públicos
+  await checkVersionAndReload();  // ✅ Asegurar versión actual
+
   const [invP, invA, preciosadmin] = await Promise.all([
     fetchJson(URLS.invP),
     fetchJson(URLS.invA),
-    fetchJson(URLS.preciosadmin)  // ✅ Ahora solo este para precios
+    fetchJson(URLS.preciosadmin)
   ]);
 
   catalogo = [];
   catalogoMap = new Map();
+  inventarioAdmin = [];  // ✅ Reset para ADMIN
 
   for (const codigo in invP) {
     const p = invP[codigo];
     const a = invA[codigo] || { cantidad: 0 };
-    const data = preciosadmin[codigo] || {};  // ✅ Usa preciosadmin para todo
+    const data = preciosadmin[codigo] || {};
 
     const obj = {
       codigo,
       producto: p.producto || "",
       departamento: p.departamento || "",
       stockTotal: Number(p.cantidad || 0) + Number(a.cantidad || 0),
-      precios: {  // ✅ Extrae precios públicos de data (preciosadmin)
+      precios: {
         precio: data.precio,
         precioA: data.precioA,
         precioB: data.precioB,
         precioC: data.precioC,
         mayoreo: data.mayoreo,
-        precioVendedor: data.precioVendedor || 0  // Si aplica
+        precioVendedor: data.precioVendedor || 0
       },
-      admin: {  // ✅ Extrae datos admin del mismo data
+      admin: {
         costo: Number(data.costo || 0),
         limite: Number(data.limite || 1)
       }
@@ -248,11 +278,216 @@ async function ensureCatalogoCargado(){
 
     catalogo.push(obj);
     catalogoMap.set(codigo, obj);
+
+    // ✅ Para ADMIN: separar stock principal y anexo
+    inventarioAdmin.push({
+      ...obj,
+      stockP: Number(p.cantidad || 0),
+      stockA: Number(a.cantidad || 0)
+    });
   }
 
   catalogo.sort((x,y) => (x.producto||"").localeCompare(y.producto||"", "es"));
+  inventarioAdmin.sort((x,y) => (x.producto||"").localeCompare(y.producto||"", "es"));
   catalogoCargado = true;
 }
+
+/* ================= INVENTARIO ADMIN ================= */
+async function abrirInventarioAdmin() {
+  contenido.classList.remove("hidden");
+  vendedorHome.classList.add("hidden");
+
+  try {
+    await ensureCatalogoCargado();
+
+    if (inventarioAdmin.length === 0) {
+      contenido.innerHTML = `
+        <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
+        <div class="card">
+          <strong>❌ No se pudo cargar el inventario.</strong>
+          <div class="muted">Revisa tu conexión a internet o contacta soporte.</div>
+        </div>
+      `;
+      return;
+    }
+
+    contenido.innerHTML = `
+      <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
+
+      <div class="card">
+        <strong>📦 Inventario Administrador</strong>
+        <div class="muted">
+          Versión actual: ${inventarioVersion}. Se recarga automáticamente si cambia.
+        </div>
+      </div>
+
+      <div class="version-info">
+        <strong>Última actualización:</strong> ${nowStr()}
+      </div>
+
+      <input id="buscarAdmin" class="buscar-admin" placeholder="🔍 Buscar por código o nombre" />
+
+      <button type="button" onclick="exportarPreciosAExcel()">📊 Exportar Precios a Excel</button>
+
+      <div class="inventario-list" id="listaInventarioAdmin">
+        <!-- La lista se poblará después -->
+      </div>
+    `;
+
+    // ✅ Ahora que el HTML está asignado, pobla la lista
+    el("listaInventarioAdmin").innerHTML = renderListaInventarioAdmin();
+
+    // ✅ Evento para búsqueda en tiempo real
+    el("buscarAdmin").addEventListener("input", () => {
+      el("listaInventarioAdmin").innerHTML = renderListaInventarioAdmin();
+    });
+  } catch (err) {
+    console.error("Error cargando inventario ADMIN:", err);
+    contenido.innerHTML = `
+      <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
+      <div class="card">
+        <button type="button" onclick="exportarPreciosAExcel()">📊 Exportar Precios a Excel</button>
+        <button type="button" onclick="exportarPreciosAJson()">📄 Exportar Precios a JSON (para GitHub)</button>
+        <strong>❌ Error al cargar inventario.</strong>
+        <div class="muted">Detalles: ${err.message}</div>
+      </div>
+    `;
+  }
+}
+function renderListaInventarioAdmin() {
+  const q = (el("buscarAdmin").value || "").toLowerCase().trim();
+  const filtrados = inventarioAdmin.filter(p =>
+    (p.codigo || "").toLowerCase().includes(q) ||
+    (p.producto || "").toLowerCase().includes(q)
+  );
+
+  return filtrados.map(prod => `
+    <div class="inventario-item">
+      <div>
+        <div class="codigo">${escapeHtml(prod.codigo)}</div>
+        <div class="producto">${escapeHtml(prod.producto)}</div>
+      </div>
+      <div class="stock">
+        <div class="etiqueta principal" onclick="abrirModalDetallesProducto('${prod.codigo}')">Principal: ${prod.stockP}</div>
+        <div class="etiqueta anexo" onclick="abrirModalDetallesProducto('${prod.codigo}')">Anexo: ${prod.stockA}</div>
+      </div>
+      <div>
+        <button type="button" class="inline" onclick="abrirModalDetallesProducto('${prod.codigo}')">Ver Detalles</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function abrirModalDetallesProducto(codigo) {
+  const prod = inventarioAdmin.find(p => p.codigo === codigo);
+  if (!prod) return;
+
+  el("dpTitulo").textContent = prod.producto;
+  el("dpSub").textContent = `Código: ${prod.codigo}`;
+
+  // ✅ Remover stock completamente, solo precios y admin
+  el("dpPrecios").innerHTML = `
+    <div class="k">Precio Público</div><div class="v"><input type="number" id="dpPrecio" step="0.01" min="0" value="${prod.precios.precio || 0}" class="edit-input" /></div>
+    <div class="k">Precio A</div><div class="v"><input type="number" id="dpPrecioA" step="0.01" min="0" value="${prod.precios.precioA || 0}" class="edit-input" /></div>
+    <div class="k">Precio B</div><div class="v"><input type="number" id="dpPrecioB" step="0.01" min="0" value="${prod.precios.precioB || 0}" class="edit-input" /></div>
+    <div class="k">Precio C</div><div class="v"><input type="number" id="dpPrecioC" step="0.01" min="0" value="${prod.precios.precioC || 0}" class="edit-input" /></div>
+    <div class="k">Mayoreo</div><div class="v"><input type="number" id="dpMayoreo" step="0.01" min="0" value="${prod.precios.mayoreo || 0}" class="edit-input" /></div>
+    <div class="k">Precio Vendedor</div><div class="v"><input type="number" id="dpPrecioVendedor" step="0.01" min="0" value="${prod.precios.precioVendedor || 0}" class="edit-input" /></div>
+  `;
+
+  el("dpAdmin").innerHTML = `
+    <div class="k">Costo</div><div class="v"><input type="number" id="dpCosto" step="0.01" min="0" value="${prod.admin.costo || 0}" class="edit-input" /></div>
+    <div class="k">Límite</div><div class="v"><input type="number" id="dpLimite" step="0.01" min="0" value="${prod.admin.limite || 0}" class="edit-input" /></div>
+  `;
+
+  // ✅ Botón de guardar
+  el("modalDetallesProducto").querySelector(".btn-row").innerHTML = `
+    <button type="button" onclick="guardarCambiosProducto('${codigo}')">💾 Guardar Cambios</button>
+    <button type="button" class="secondary" onclick="cerrarModalDetallesProducto()">Cerrar</button>
+  `;
+
+  openModal("modalDetallesProducto");
+}
+
+function guardarCambiosProducto(codigo) {
+  const prod = inventarioAdmin.find(p => p.codigo === codigo);
+  if (!prod) return;
+
+  // ✅ Solo guardar precios, costo y límite
+  prod.precios.precio = Math.max(0, Number(el("dpPrecio").value || 0));
+  prod.precios.precioA = Math.max(0, Number(el("dpPrecioA").value || 0));
+  prod.precios.precioB = Math.max(0, Number(el("dpPrecioB").value || 0));
+  prod.precios.precioC = Math.max(0, Number(el("dpPrecioC").value || 0));
+  prod.precios.mayoreo = Math.max(0, Number(el("dpMayoreo").value || 0));
+  prod.precios.precioVendedor = Math.max(0, Number(el("dpPrecioVendedor").value || 0));
+
+  prod.admin.costo = Math.max(0, Number(el("dpCosto").value || 0));
+  prod.admin.limite = Math.max(0, Number(el("dpLimite").value || 0));
+
+  alert("✅ Cambios guardados localmente. Recuerda exportar para actualizar en GitHub.");
+  cerrarModalDetallesProducto();
+  // ✅ Recargar lista
+  el("listaInventarioAdmin").innerHTML = renderListaInventarioAdmin();
+}
+
+function cerrarModalDetallesProducto() {
+  closeModal("modalDetallesProducto");
+}
+
+function modificarPrecio(codigo, tipo, valor) {
+  const prod = inventarioAdmin.find(p => p.codigo === codigo);
+  if (!prod) return;
+  prod.precios[tipo] = Number(valor || 0);
+  // ✅ Opcional: Guardar cambios localmente si quieres persistencia temporal
+}
+
+function exportarPreciosAJson() {
+  // ✅ Crear un objeto que coincida con preciosadmin.json
+  const data = {};
+  inventarioAdmin.forEach(prod => {
+    data[prod.codigo] = {
+      precio: prod.precios.precio || 0,
+      precioA: prod.precios.precioA || 0,
+      precioB: prod.precios.precioB || 0,
+      precioC: prod.precios.precioC || 0,
+      mayoreo: prod.precios.mayoreo || 0,
+      precioVendedor: prod.precios.precioVendedor || 0,
+      costo: prod.admin.costo || 0,
+      limite: prod.admin.limite || 0
+    };
+  });
+
+  const jsonStr = JSON.stringify(data, null, 2);
+  const blob = new Blob([jsonStr], { type: "application/json" });
+  setLastFile(blob, `preciosadmin-${Date.now()}.json`, "Precios Admin - Ferretería Universal", "Archivo JSON para actualizar en GitHub");
+
+  // ✅ Reutilizar la función de compartir/descargar
+  compartirArchivo();
+}
+
+function exportarPreciosAExcel() {
+  const data = inventarioAdmin.map(prod => ({
+    Codigo: prod.codigo,
+    Producto: prod.producto,
+    Precio: prod.precios.precio || 0,
+    PrecioA: prod.precios.precioA || 0,
+    PrecioB: prod.precios.precioB || 0,
+    PrecioC: prod.precios.precioC || 0,
+    Mayoreo: prod.precios.mayoreo || 0,
+    Costo: prod.admin.costo,
+    Limite: prod.admin.limite
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Precios");
+  const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+
+  setLastFile(blob, `precios-${Date.now()}.xlsx`, "Precios - Ferretería Universal", "Archivo Excel de precios");
+  compartirArchivo();  // ✅ Reutiliza la función de compartir
+}
+
 /* ================= CLIENTES (pantalla normal) ================= */
 function abrirClientes() {
   vendedorHome.classList.add("hidden");
