@@ -355,10 +355,9 @@ main{ padding:12px; }
 
 /* ---------- Modal Detalles Producto ---------- */
 #modalDetallesProducto .modal-card {
-  max-width: 260px; /* Aún más pequeño y cuadrado */
-  padding: 10px; /* Padding mínimo */
-  border-radius: 10px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+  width: 95%;
+  max-width: 700px;  /* ✅ Más ancho que el original (420px) */
+  padding: 24px;     /* Un poco más de padding para espacio */
 }
 
 #modalDetallesProducto .prices-list {
@@ -367,8 +366,7 @@ main{ padding:12px; }
 }
 
 #modalDetallesProducto .card-lite {
-  padding: 6px;
-  margin-bottom: 6px;
+  padding: 14px;     /* Más padding interno para comodidad */
 }
 
 #modalDetallesProducto .edit-input {
@@ -400,4 +398,55 @@ main{ padding:12px; }
   font-size: 9px; /* Texto más pequeño */
   border-radius: 10px;
   width: fit-content; /* Ajustar al contenido */
+}
+
+/* ---------- Modal Confirmación ---------- */
+#modalGuardarCambios .modal-card {
+  text-align: center;
+  background: linear-gradient(135deg, var(--azul), #1b2c6b);
+  color: #fff;
+  border-radius: 18px;
+  box-shadow: 0 14px 40px rgba(0,0,0,.35);
+}
+
+#modalGuardarCambios h3 {
+  color: #fff;
+  margin-bottom: 10px;
+}
+
+#modalGuardarCambios .muted {
+  color: #E5E7EB;
+  font-size: 14px;
+}
+
+#modalGuardarCambios button {
+  background: var(--naranja);
+  color: #fff;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+#modalGuardarCambios button:hover {
+  background: #F28C1C;
+  transform: scale(1.05);
+}
+
+#modalDetallesProducto .prices-list input {
+  width: 100%;
+  padding: 6px;
+  border-radius: 6px;
+  border: 1px solid var(--borde);
+  font-size: 12px;
+  text-align: right;
+}
+
+@media (max-width: 768px) {
+  #modalDetallesProducto .modal-card {
+    width: 98%;
+    padding: 16px;
+  }
 }
