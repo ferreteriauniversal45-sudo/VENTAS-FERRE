@@ -311,28 +311,29 @@ async function abrirInventarioAdmin() {
       return;
     }
 
-    contenido.innerHTML = `
-      <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
+ contenido.innerHTML = `
+    <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
 
-      <div class="card">
-        <strong>📦 Inventario Administrador</strong>
-        <div class="muted">
-          Versión actual: ${inventarioVersion}. Se recarga automáticamente si cambia.
-        </div>
+    <div class="card">
+      <strong>📦 Inventario Administrador</strong>
+      <div class="muted">
+        Versión actual: ${inventarioVersion}. Se recarga automáticamente si cambia.
       </div>
+    </div>
 
-      <div class="version-info">
-        <strong>Última actualización:</strong> ${nowStr()}
-      </div>
+    <div class="version-info">
+      <strong>Última actualización:</strong> ${nowStr()}
+    </div>
 
-      <input id="buscarAdmin" class="buscar-admin" placeholder="🔍 Buscar por código o nombre" />
+    <input id="buscarAdmin" class="buscar-admin" placeholder="🔍 Buscar por código o nombre" />
 
+    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+      <button type="button" onclick="guardarCambiosAdmin()">💾 Guardar Cambios</button>
       <button type="button" onclick="exportarPreciosAExcel()">📊 Exportar Precios a Excel</button>
+    </div>
 
-      <div class="inventario-list" id="listaInventarioAdmin">
-        <!-- La lista se poblará después -->
-      </div>
-    `;
+    <div class="inventario-list" id="listaInventarioAdmin"></div>
+  `;
 
     // ✅ Ahora que el HTML está asignado, pobla la lista
     el("listaInventarioAdmin").innerHTML = renderListaInventarioAdmin();
@@ -354,6 +355,23 @@ async function abrirInventarioAdmin() {
     `;
   }
 }
+function guardarCambiosAdmin() {
+  // Guardar los precios modificados en localStorage
+  const preciosModificados = {};
+  inventarioAdmin.forEach(prod => {
+    preciosModificados[prod.codigo] = prod.precios;
+  });
+  localStorage.setItem("preciosModificadosAdmin", JSON.stringify(preciosModificados));
+
+  // Mostrar modal de confirmación
+  openModal("modalGuardarCambios");
+}
+
+function cerrarModalGuardarCambios() {
+  closeModal("modalGuardarCambios");
+}
+
+
 function renderListaInventarioAdmin() {
   const q = (el("buscarAdmin").value || "").toLowerCase().trim();
   const filtrados = inventarioAdmin.filter(p =>
@@ -385,28 +403,71 @@ function abrirModalDetallesProducto(codigo) {
   el("dpTitulo").textContent = prod.producto;
   el("dpSub").textContent = `Código: ${prod.codigo}`;
 
-  // ✅ Remover stock completamente, solo precios y admin
+  // ✅ Precios editables (sin stock)
   el("dpPrecios").innerHTML = `
-    <div class="k">Precio Público</div><div class="v"><input type="number" id="dpPrecio" step="0.01" min="0" value="${prod.precios.precio || 0}" class="edit-input" /></div>
-    <div class="k">Precio A</div><div class="v"><input type="number" id="dpPrecioA" step="0.01" min="0" value="${prod.precios.precioA || 0}" class="edit-input" /></div>
-    <div class="k">Precio B</div><div class="v"><input type="number" id="dpPrecioB" step="0.01" min="0" value="${prod.precios.precioB || 0}" class="edit-input" /></div>
-    <div class="k">Precio C</div><div class="v"><input type="number" id="dpPrecioC" step="0.01" min="0" value="${prod.precios.precioC || 0}" class="edit-input" /></div>
-    <div class="k">Mayoreo</div><div class="v"><input type="number" id="dpMayoreo" step="0.01" min="0" value="${prod.precios.mayoreo || 0}" class="edit-input" /></div>
-    <div class="k">Precio Vendedor</div><div class="v"><input type="number" id="dpPrecioVendedor" step="0.01" min="0" value="${prod.precios.precioVendedor || 0}" class="edit-input" /></div>
+    <div class="k">Precio Público</div><input class="v" type="number" step="0.01" value="${prod.precios.precio || 0}" id="dpPrecio">
+    <div class="k">Precio A</div><input class="v" type="number" step="0.01" value="${prod.precios.precioA || 0}" id="dpPrecioA">
+    <div class="k">Precio B</div><input class="v" type="number" step="0.01" value="${prod.precios.precioB || 0}" id="dpPrecioB">
+    <div class="k">Precio C</div><input class="v" type="number" step="0.01" value="${prod.precios.precioC || 0}" id="dpPrecioC">
+    <div class="k">Mayoreo</div><input class="v" type="number" step="0.01" value="${prod.precios.mayoreo || 0}" id="dpMayoreo">
+    <div class="k">Precio Vendedor</div><input class="v" type="number" step="0.01" value="${prod.precios.precioVendedor || 0}" id="dpPrecioVendedor">
   `;
 
+  // ✅ Admin editables (costo y límite)
   el("dpAdmin").innerHTML = `
-    <div class="k">Costo</div><div class="v"><input type="number" id="dpCosto" step="0.01" min="0" value="${prod.admin.costo || 0}" class="edit-input" /></div>
-    <div class="k">Límite</div><div class="v"><input type="number" id="dpLimite" step="0.01" min="0" value="${prod.admin.limite || 0}" class="edit-input" /></div>
-  `;
-
-  // ✅ Botón de guardar
-  el("modalDetallesProducto").querySelector(".btn-row").innerHTML = `
-    <button type="button" onclick="guardarCambiosProducto('${codigo}')">💾 Guardar Cambios</button>
-    <button type="button" class="secondary" onclick="cerrarModalDetallesProducto()">Cerrar</button>
+    <div class="k">Costo</div><input class="v" type="number" step="0.01" value="${prod.admin.costo || 0}" id="dpCosto">
+    <div class="k">Límite</div><input class="v" type="number" step="0.01" value="${prod.admin.limite || 0}" id="dpLimite">
   `;
 
   openModal("modalDetallesProducto");
+}
+
+// ✅ Actualizar guardarCambiosEnModal para incluir costo y límite
+function guardarCambiosEnModal() {
+  const prod = inventarioAdmin.find(p => p.codigo === el("dpSub").textContent.split(": ")[1]);
+  if (!prod) return;
+
+  // Actualizar precios
+  prod.precios.precio = Number(el("dpPrecio").value || 0);
+  prod.precios.precioA = Number(el("dpPrecioA").value || 0);
+  prod.precios.precioB = Number(el("dpPrecioB").value || 0);
+  prod.precios.precioC = Number(el("dpPrecioC").value || 0);
+  prod.precios.mayoreo = Number(el("dpMayoreo").value || 0);
+  prod.precios.precioVendedor = Number(el("dpPrecioVendedor").value || 0);
+
+  // ✅ Actualizar admin (costo y límite)
+  prod.admin.costo = Number(el("dpCosto").value || 0);
+  prod.admin.limite = Number(el("dpLimite").value || 0);
+
+  // Guardar en localStorage
+  const preciosModificados = JSON.parse(localStorage.getItem("preciosModificadosAdmin") || "{}");
+  preciosModificados[prod.codigo] = { ...prod.precios, costo: prod.admin.costo, limite: prod.admin.limite };
+  localStorage.setItem("preciosModificadosAdmin", JSON.stringify(preciosModificados));
+
+  // Mostrar modal de confirmación
+  openModal("modalGuardarCambios");
+}
+
+// ✅ Nueva función para guardar cambios desde el modal
+function guardarCambiosEnModal() {
+  const prod = inventarioAdmin.find(p => p.codigo === el("dpSub").textContent.split(": ")[1]); // Extraer código del subtítulo
+  if (!prod) return;
+
+  // Actualizar precios desde los inputs
+  prod.precios.precio = Number(el("dpPrecio").value || 0);
+  prod.precios.precioA = Number(el("dpPrecioA").value || 0);
+  prod.precios.precioB = Number(el("dpPrecioB").value || 0);
+  prod.precios.precioC = Number(el("dpPrecioC").value || 0);
+  prod.precios.mayoreo = Number(el("dpMayoreo").value || 0);
+  prod.precios.precioVendedor = Number(el("dpPrecioVendedor").value || 0);
+
+  // Guardar en localStorage
+  const preciosModificados = JSON.parse(localStorage.getItem("preciosModificadosAdmin") || "{}");
+  preciosModificados[prod.codigo] = prod.precios;
+  localStorage.setItem("preciosModificadosAdmin", JSON.stringify(preciosModificados));
+
+  // Mostrar modal de confirmación
+  openModal("modalGuardarCambios");
 }
 
 function guardarCambiosProducto(codigo) {
