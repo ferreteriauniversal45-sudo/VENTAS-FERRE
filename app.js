@@ -1545,6 +1545,9 @@ let conteos = JSON.parse(localStorage.getItem("conteos") || "[]");
 
 let movimientos = JSON.parse(localStorage.getItem("movimientos") || "[]");
 
+let opInvStockFiltro = localStorage.getItem("opInvStockFiltro") || "TODOS";
+
+
 /* ================= OPERADOR: INVENTARIO ================= */
 async function abrirInventarioOperador(){
   vendedorHome.classList.add("hidden");
@@ -1560,6 +1563,13 @@ async function abrirInventarioOperador(){
     </div>
 
     <input id="opBuscarInv" placeholder="🔍 Buscar por código o nombre" />
+
+    <div class="filter-row">
+      <button type="button" class="secondary filter-btn" id="opInvF_TODOS" onclick="setOpInvStockFiltro('TODOS')">Todos</button>
+      <button type="button" class="secondary filter-btn" id="opInvF_CON" onclick="setOpInvStockFiltro('CON')">Con stock</button>
+      <button type="button" class="secondary filter-btn" id="opInvF_SIN" onclick="setOpInvStockFiltro('SIN')">Sin stock</button>
+    </div>
+
     <div class="inventario-list" id="opListaInv"></div>
   `;
 
@@ -1568,7 +1578,25 @@ async function abrirInventarioOperador(){
   const input = el("opBuscarInv");
   if (input) input.addEventListener("input", renderInventarioOperador);
 
+  updateInvFilterButtons();
   renderInventarioOperador();
+}
+
+
+
+function setOpInvStockFiltro(val){
+  opInvStockFiltro = String(val || "TODOS").toUpperCase();
+  localStorage.setItem("opInvStockFiltro", opInvStockFiltro);
+  updateInvFilterButtons();
+  renderInventarioOperador();
+}
+
+function updateInvFilterButtons(){
+  ["TODOS","CON","SIN"].forEach(k => {
+    const btn = el("opInvF_" + k);
+    if (!btn) return;
+    btn.classList.toggle("active", opInvStockFiltro === k);
+  });
 }
 
 function renderInventarioOperador(){
@@ -1579,10 +1607,21 @@ function renderInventarioOperador(){
   if (!cont) return;
 
   const filtrados = catalogo
-    .filter(p =>
-      (p.codigo || "").toLowerCase().includes(q) ||
-      (p.producto || "").toLowerCase().includes(q)
-    )
+    .filter(p => {
+      const match =
+        (p.codigo || "").toLowerCase().includes(q) ||
+        (p.producto || "").toLowerCase().includes(q);
+
+      if (!match) return false;
+
+      const stockVal = isBodeguero()
+        ? Number(p.stockA ?? 0)
+        : Number(p.stockTotal ?? 0);
+
+      if (opInvStockFiltro === "CON") return stockVal > 0;
+      if (opInvStockFiltro === "SIN") return stockVal <= 0;
+      return true;
+    })
     .slice(0, 250);
 
   cont.innerHTML = filtrados.length ? filtrados.map(p => `
@@ -1688,7 +1727,6 @@ async function abrirEntradasOperador(){
     items: []
   };
 
-  agregarFilaEntrada();
   renderEntradasOperador();
 }
 
@@ -1731,7 +1769,7 @@ async function abrirEntradasOperadorEditar(movId){
     });
   });
 
-  if (!entradaFactura.items.length) agregarFilaEntrada();
+  // (sin filas vacías por defecto)
   renderEntradasOperador();
 }
 
@@ -1773,7 +1811,7 @@ function renderEntradasOperador(){
     <div class="op-table" id="opItemsWrap"></div>
 
     <div style="height:10px"></div>
-    <button type="button" class="secondary" onclick="agregarFilaEntrada(); renderFilasEntrada(); actualizarPreviewEntrada();">➕ Agregar producto</button>
+    <button type="button" class="secondary" onclick="abrirModalAddMovItem('ENTRADA')">➕ Agregar producto</button>
 
     <div class="factura-fija">
       <div class="factura-card">
@@ -1841,7 +1879,7 @@ function agregarFilaEntrada(){
 
 function borrarFilaEntrada(id){
   entradaFactura.items = entradaFactura.items.filter(x => String(x.id) !== String(id));
-  if (!entradaFactura.items.length) agregarFilaEntrada();
+  // (sin filas vacías por defecto)
   renderFilasEntrada();
   actualizarPreviewEntrada();
 }
@@ -1849,6 +1887,11 @@ function borrarFilaEntrada(id){
 function renderFilasEntrada(){
   const wrap = el("opItemsWrap");
   if (!wrap) return;
+
+  if (!entradaFactura.items.length) {
+    wrap.innerHTML = `<div style="padding:12px; color:#6B7280; font-weight:800;">No hay productos agregados. Usa “Agregar producto”.</div>`;
+    return;
+  }
 
   wrap.innerHTML = entradaFactura.items.map((it) => {
     const qtyVal = (it.cantidad === "" || it.cantidad === null || it.cantidad === undefined)
@@ -2055,6 +2098,21 @@ function seleccionarProductoOperador(codigo){
   const prod = catalogoMap.get(codigoFmt);
   const nombre = prod ? (prod.producto || "") : "";
 
+  // ✅ Selección desde el modal "Agregar producto"
+  if (operadorFilaActivaId === "__ADD__") {
+    const codeEl = el("addMovCodigo");
+    const prodEl = el("addMovProducto");
+    if (codeEl) codeEl.value = codigoFmt;
+    if (prodEl) prodEl.value = nombre;
+
+    const sug = el("addMovSug");
+    if (sug) sug.innerHTML = "";
+
+    cerrarModalProductosOperador();
+    setTimeout(() => el("addMovQty")?.focus(), 50);
+    return;
+  }
+
   if (operadorFilaActivaTipo === "ENTRADA") {
     const it = entradaFactura?.items?.find(x => x.id === operadorFilaActivaId);
     if (!it) return;
@@ -2138,6 +2196,203 @@ function seleccionarProductoOperador(codigo){
   // default fallback
   cerrarModalProductosOperador();
 }
+
+
+
+/* ===== Modal: Agregar producto (OPERADOR - ENTRADAS / SALIDAS) ===== */
+let addMovTipo = "ENTRADA";
+
+function abrirModalAddMovItem(tipo){
+  addMovTipo = String(tipo || "ENTRADA").toUpperCase();
+
+  const t = el("addMovTitulo");
+  const sub = el("addMovSub");
+
+  let label = "Entrada";
+  if (addMovTipo === "SALIDA") label = "Salida";
+  else if (addMovTipo === "CONTEO") label = "Conteo";
+
+  if (t) t.textContent = `Agregar producto (${label})`;
+  if (sub) sub.textContent = "Escribe el código (auto “-”) o usa la lupa para buscar por nombre.";
+
+  if (el("addMovCodigo")) el("addMovCodigo").value = "";
+  if (el("addMovProducto")) el("addMovProducto").value = "";
+  if (el("addMovQty")) {
+    el("addMovQty").value = "";
+    el("addMovQty").min = (addMovTipo === "CONTEO") ? "0" : "1";
+  }
+  if (el("addMovSug")) el("addMovSug").innerHTML = "";
+
+  openModal("modalAddMovItem");
+  setTimeout(() => el("addMovCodigo")?.focus(), 50);
+}
+
+function cerrarModalAddMovItem(){
+  closeModal("modalAddMovItem");
+}
+
+function abrirBusquedaProductoParaAddMov(){
+  // Reutiliza el modal existente de búsqueda por nombre/código
+  abrirModalProductosOperador("__ADD__", addMovTipo);
+}
+
+function onAddMovCodigoInput(val){
+  const formatted = formatCodigoAutoGuion(val);
+
+  const codeEl = el("addMovCodigo");
+  const prodEl = el("addMovProducto");
+
+  if (codeEl && codeEl.value !== formatted) codeEl.value = formatted;
+
+  const prod = catalogoMap.get(formatted);
+  if (prodEl) prodEl.value = prod ? (prod.producto || "") : "";
+
+  updateSugerenciasAddMov();
+}
+
+function updateSugerenciasAddMov(){
+  const cont = el("addMovSug");
+  if (!cont) return;
+
+  const raw = (el("addMovCodigo")?.value || "").toLowerCase().trim();
+  const formatted = formatCodigoAutoGuion(raw);
+
+  // Si ya existe exacto, ocultar sugerencias
+  if (formatted && catalogoMap.has(formatted)) {
+    cont.innerHTML = "";
+    return;
+  }
+
+  if (!raw || raw.replace('-', '').length < 2) {
+    cont.innerHTML = "";
+    return;
+  }
+
+  const q = formatted.toLowerCase();
+  const qNoDash = q.replace('-', '');
+
+  const matches = catalogo
+    .filter(p => {
+      const code = String(p.codigo || "").toLowerCase();
+      const codeNoDash = code.replace('-', '');
+      const name = String(p.producto || "").toLowerCase();
+      return (
+        code.startsWith(q) ||
+        code.includes(q) ||
+        codeNoDash.startsWith(qNoDash) ||
+        name.includes(qNoDash)
+      );
+    })
+    .slice(0, 10);
+
+  cont.innerHTML = matches.length ? matches.map(p => `
+    <span class="chip" onclick="seleccionarSugerenciaAddMov('${encodeURIComponent(p.codigo)}')">
+      ${escapeHtml(p.codigo)} • ${escapeHtml(p.producto)}
+    </span>
+  `).join('') : '';
+}
+
+function seleccionarSugerenciaAddMov(codigoEnc){
+  const codigo = decodeURIComponent(codigoEnc || "");
+
+  const codeEl = el("addMovCodigo");
+  const prodEl = el("addMovProducto");
+
+  if (codeEl) codeEl.value = codigo;
+
+  const prod = catalogoMap.get(codigo);
+  if (prodEl) prodEl.value = prod ? (prod.producto || "") : "";
+
+  const cont = el("addMovSug");
+  if (cont) cont.innerHTML = "";
+
+  setTimeout(() => el("addMovQty")?.focus(), 50);
+}
+
+function confirmarAddMovItem(){
+  const codigoRaw = el("addMovCodigo")?.value || "";
+  const codigo = formatCodigoAutoGuion(codigoRaw);
+
+  const prod = catalogoMap.get(codigo);
+  if (!codigo || !prod) {
+    alert("Selecciona un producto válido.");
+    return;
+  }
+
+  const qtyInput = String(el("addMovQty")?.value ?? "").trim();
+  const qtyNum = Number(qtyInput);
+
+  if (qtyInput === "" || Number.isNaN(qtyNum)) {
+    alert("Ingresa una cantidad válida.");
+    return;
+  }
+
+  // ENTRADA / SALIDA => mínimo 1, CONTEO => permite 0
+  const qty = (addMovTipo === "CONTEO")
+    ? Math.max(0, qtyNum)
+    : Math.max(1, qtyNum);
+
+  if (addMovTipo !== "CONTEO" && qty < 1) {
+    alert("Ingresa una cantidad válida.");
+    return;
+  }
+  if (addMovTipo === "CONTEO" && qty < 0) {
+    alert("Ingresa una cantidad válida.");
+    return;
+  }
+
+  if (addMovTipo === "ENTRADA") {
+    if (!entradaFactura) return;
+    addOrSumMovItem(entradaFactura.items, codigo, prod.producto || "", qty);
+    renderFilasEntrada();
+    actualizarPreviewEntrada();
+  } else if (addMovTipo === "SALIDA") {
+    if (!salidaFactura) return;
+    addOrSumMovItem(salidaFactura.items, codigo, prod.producto || "", qty);
+    renderFilasSalida();
+    actualizarPreviewSalida();
+  } else if (addMovTipo === "CONTEO") {
+    if (!conteoDoc) return;
+    addOrSumMovItem(conteoDoc.items, codigo, prod.producto || "", qty);
+    renderFilasConteo();
+    actualizarPreviewConteo();
+  }
+
+  // limpiar para seguir agregando rápido
+  if (el("addMovCodigo")) el("addMovCodigo").value = "";
+  if (el("addMovProducto")) el("addMovProducto").value = "";
+  if (el("addMovQty")) el("addMovQty").value = "";
+  if (el("addMovSug")) el("addMovSug").innerHTML = "";
+
+  setTimeout(() => el("addMovCodigo")?.focus(), 50);
+}
+
+function addOrSumMovItem(arr, codigo, producto, qty){
+  const existing = arr.find(x => String(x.codigo || "").trim() === String(codigo || "").trim());
+  if (existing) {
+    const prev = Number(existing.cantidad || 0) || 0;
+    existing.cantidad = prev + Number(qty || 0);
+    existing.producto = producto || existing.producto || "";
+    return;
+  }
+
+  arr.push({
+    id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
+    codigo,
+    producto: producto || "",
+    cantidad: Number(qty || 0)
+  });
+}
+
+// Eventos del modal (input + Enter)
+el("addMovCodigo")?.addEventListener("input", (e) => onAddMovCodigoInput(e.target.value));
+el("addMovCodigo")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") el("addMovQty")?.focus();
+});
+el("addMovQty")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") confirmarAddMovItem();
+});
+
 
 /* ===== Vista previa fija ===== */
 function actualizarPreviewEntrada(){
@@ -2242,7 +2497,6 @@ async function abrirSalidasOperador(){
     items: []
   };
 
-  agregarFilaSalida();
   renderSalidasOperador();
 }
 
@@ -2284,7 +2538,7 @@ async function abrirSalidasOperadorEditar(movId){
     });
   });
 
-  if (!salidaFactura.items.length) agregarFilaSalida();
+  // (sin filas vacías por defecto)
   renderSalidasOperador();
 }
 
@@ -2316,7 +2570,7 @@ function renderSalidasOperador(){
     <div class="card-lite">
       <div style="display:flex; gap:10px; align-items:center; justify-content:space-between;">
         <strong>Productos</strong>
-        <button type="button" class="secondary small" onclick="agregarFilaSalida()">➕ Línea</button>
+        <button type="button" class="secondary small" onclick="abrirModalAddMovItem('SALIDA')">➕ Agregar</button>
       </div>
 
       <div class="op-table" style="margin-top:10px;">
@@ -2352,6 +2606,11 @@ function onSalidaFacturaChange(v){
 function renderFilasSalida(){
   const wrap = el("opItemsWrapSalida");
   if (!wrap) return;
+
+  if (!salidaFactura.items.length) {
+    wrap.innerHTML = `<div style="padding:12px; color:#6B7280; font-weight:800;">No hay productos agregados. Usa “Agregar”.</div>`;
+    return;
+  }
 
   wrap.innerHTML = salidaFactura.items.map((it) => {
     const qtyVal = (it.cantidad === "" || it.cantidad === null || it.cantidad === undefined)
@@ -2410,7 +2669,7 @@ function agregarFilaSalida(){
 
 function borrarFilaSalida(id){
   salidaFactura.items = salidaFactura.items.filter(x => x.id !== id);
-  if (!salidaFactura.items.length) agregarFilaSalida();
+  // (sin filas vacías por defecto)
   renderFilasSalida();
   actualizarPreviewSalida();
 }
@@ -3002,8 +3261,10 @@ async function abrirConteosOperador(){
     items: []
   };
 
-  agregarFilaConteo();
+  // Inicia vacío: agregar productos desde el modal
   renderConteosOperador();
+  renderFilasConteo();
+  actualizarPreviewConteo();
 }
 
 async function abrirConteosOperadorEditar(movId){
@@ -3076,7 +3337,7 @@ function renderConteosOperador(){
     <div class="card-lite">
       <div style="display:flex; gap:10px; align-items:center; justify-content:space-between;">
         <strong>Productos</strong>
-        <button type="button" class="secondary small" onclick="agregarFilaConteo()">➕ Línea</button>
+        <button type="button" class="secondary small" onclick="abrirModalAddMovItem('CONTEO')">➕ Agregar producto</button>
       </div>
 
       <div class="op-table" style="margin-top:10px;">
@@ -3736,5 +3997,4 @@ function vaciarMovimientosOperador(){
   localStorage.setItem("transferencias", "[]");
   localStorage.setItem("conteos", "[]");
 }
-
 
