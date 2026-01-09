@@ -304,3 +304,100 @@ main{ padding:12px; }
   border-radius:12px;
   background:#fff;
 }
+
+.inventario-list {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.inventario-item {
+  background: #fff;
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.inventario-item .codigo { font-weight: 900; }
+.inventario-item .producto { font-weight: 800; color: var(--azul); }
+.inventario-item .stock { display: flex; gap: 8px; }
+
+.etiqueta {
+  background: var(--naranja);
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 900;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.etiqueta:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+.etiqueta.anexo { background: #6B7280; }
+
+.etiqueta.principal { background: var(--azul); }
+
+.buscar-admin {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+/* ---------- Modal Detalles Producto ---------- */
+#modalDetallesProducto .modal-card {
+  max-width: 260px; /* Aún más pequeño y cuadrado */
+  padding: 10px; /* Padding mínimo */
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+}
+
+#modalDetallesProducto .prices-list {
+  gap: 4px 6px; /* Muy compacto */
+  font-size: 10px; /* Texto pequeño */
+}
+
+#modalDetallesProducto .card-lite {
+  padding: 6px;
+  margin-bottom: 6px;
+}
+
+#modalDetallesProducto .edit-input {
+  padding: 3px 5px;
+  font-size: 10px;
+}
+
+#modalDetallesProducto .btn-row {
+  margin-top: 8px;
+  gap: 4px;
+}
+
+#modalDetallesProducto .btn-row button {
+  padding: 6px 8px;
+  font-size: 10px;
+}
+
+/* ---------- Inventario Item (Stock Vertical y Pequeño) ---------- */
+.inventario-item .stock {
+  display: flex;
+  flex-direction: column; /* Vertical en lugar de horizontal */
+  gap: 2px; /* Espacio mínimo entre etiquetas */
+  align-items: flex-start; /* Alinear a la izquierda */
+  width: auto; /* No ocupar todo el ancho */
+}
+
+.inventario-item .stock .etiqueta {
+  padding: 3px 6px; /* Más pequeño */
+  font-size: 9px; /* Texto más pequeño */
+  border-radius: 10px;
+  width: fit-content; /* Ajustar al contenido */
+}
