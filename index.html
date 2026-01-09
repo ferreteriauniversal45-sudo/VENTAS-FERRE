@@ -156,6 +156,33 @@
   </div>
 </div>
 
+
+<!-- ================= MODAL: AGREGAR PRODUCTO (OPERADOR) ================= -->
+<div id="modalAddMovItem" class="modal">
+  <div class="modal-card">
+    <h3 id="addMovTitulo">Agregar producto</h3>
+    <p id="addMovSub" class="muted">Escribe el código o usa la lupa para buscarlo por nombre.</p>
+
+    <div class="addmov-grid">
+      <input id="addMovCodigo" placeholder="12-0065lb" />
+      <button type="button" class="op-icon-btn secondary" onclick="abrirBusquedaProductoParaAddMov()" title="Buscar">🔎</button>
+    </div>
+
+    <div id="addMovSug" class="op-sugs" style="padding:0; margin:-4px 0 10px;"></div>
+
+    <input id="addMovProducto" placeholder="Producto" disabled />
+
+    <label class="label">Cantidad</label>
+    <input id="addMovQty" type="number" min="1" placeholder="Ej: 5" />
+
+    <div class="btn-row">
+      <button type="button" onclick="confirmarAddMovItem()">Agregar</button>
+      <button type="button" class="secondary" onclick="cerrarModalAddMovItem()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+
 <!-- ================= MODAL: AGREGAR PRODUCTO (CANTIDAD + PRECIO) ================= -->
 <div id="modalAgregarProducto" class="modal">
   <div class="modal-card">
