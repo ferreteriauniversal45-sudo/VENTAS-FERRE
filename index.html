@@ -22,6 +22,7 @@
 
     <div id="roles">
       <button type="button" onclick="selectRole('OPERADOR')">👷 OPERADOR</button>
+      <button type="button" onclick="selectRole('BODEGUERO')">📦 BODEGUERO</button>
       <button type="button" onclick="selectRole('VENDEDOR')">🧾 VENDEDOR</button>
       <button type="button" onclick="selectRole('ADMIN')">⚙️ ADMINISTRADOR</button>
     </div>
@@ -58,6 +59,18 @@
       <button type="button" onclick="abrirCotizacion()">🧾 Nueva Cotización</button>
       <button type="button" onclick="abrirClientes()">👤 Clientes</button>
       <button type="button" class="secondary" onclick="abrirHistorialCotizaciones()">📑 Cotizaciones guardadas</button>
+    </div>
+
+    <!-- ✅ HOME OPERADOR -->
+    <div id="operadorHome" class="hidden">
+      <button type="button" onclick="abrirInventarioOperador()">📦 Inventario</button>
+      <button type="button" onclick="abrirEntradasOperador()">📥 Entradas</button>
+      <button type="button" onclick="abrirSalidasOperador()">📤 Salidas</button>
+      <button type="button" onclick="abrirTransferenciasOperador()">🔄 Transferencias</button>
+      <button type="button" onclick="abrirConteosOperador()">✅ Conteos</button>
+
+      <button type="button" class="secondary" onclick="abrirMovimientosOperador()">📚 Movimientos</button>
+      <button type="button" class="danger" onclick="abrirNegativosOperador()">📉 Productos en negativo</button>
     </div>
 
     <div id="contenido" class="hidden"></div>
@@ -117,7 +130,7 @@
   </div>
 </div>
 
-<!-- ================= MODAL: BUSCAR PRODUCTOS ================= -->
+<!-- ================= MODAL: BUSCAR PRODUCTOS (VENDEDOR) ================= -->
 <div id="modalProductos" class="modal">
   <div class="modal-card">
     <h3>Buscar producto</h3>
@@ -126,6 +139,19 @@
 
     <div class="btn-row">
       <button type="button" class="secondary" onclick="cerrarModalProductos()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: BUSCAR PRODUCTOS (OPERADOR - ENTRADAS) ================= -->
+<div id="modalProductosOperador" class="modal">
+  <div class="modal-card">
+    <h3>Buscar producto</h3>
+    <input id="buscarProductoOperador" placeholder="🔍 Buscar por nombre (o código)" />
+    <div id="listaProductosOperador" class="modal-list"></div>
+
+    <div class="btn-row">
+      <button type="button" class="secondary" onclick="cerrarModalProductosOperador()">Cerrar</button>
     </div>
   </div>
 </div>
@@ -157,6 +183,7 @@
     </div>
   </div>
 </div>
+
 <!-- ================= MODAL: ERROR DE PRECIO ================= -->
 <div id="modalErrorPrecio" class="modal">
   <div class="modal-card">
@@ -176,7 +203,6 @@
     <h3 id="dpTitulo">Producto</h3>
     <p id="dpSub" class="muted"></p>
 
-    <!-- ✅ Layout horizontal: precios y admin lado a lado -->
     <div style="display: flex; gap: 20px;">
       <div class="card-lite" style="flex: 1;">
         <strong>Precios (Editables)</strong>
