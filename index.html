@@ -176,27 +176,36 @@
     <h3 id="dpTitulo">Producto</h3>
     <p id="dpSub" class="muted"></p>
 
-    <div class="card-lite">
-      <strong>Stock</strong>
-      <div id="dpStock" class="prices-list"></div>
-    </div>
+    <!-- ✅ Layout horizontal: precios y admin lado a lado -->
+    <div style="display: flex; gap: 20px;">
+      <div class="card-lite" style="flex: 1;">
+        <strong>Precios (Editables)</strong>
+        <div id="dpPrecios" class="prices-list"></div>
+      </div>
 
-    <div class="card-lite">
-      <strong>Precios</strong>
-      <div id="dpPrecios" class="prices-list"></div>
-    </div>
-
-    <div class="card-lite">
-      <strong>Admin</strong>
-      <div id="dpAdmin" class="prices-list"></div>
+      <div class="card-lite" style="flex: 1;">
+        <strong>Admin (Editables)</strong>
+        <div id="dpAdmin" class="prices-list"></div>
+      </div>
     </div>
 
     <div class="btn-row">
-      <button type="button" onclick="cerrarModalDetallesProducto()">Cerrar</button>
+      <button type="button" onclick="guardarCambiosEnModal()">💾 Guardar Cambios</button>
+      <button type="button" class="secondary" onclick="cerrarModalDetallesProducto()">Cerrar</button>
     </div>
   </div>
 </div>
 
+<!-- ================= MODAL: CONFIRMACIÓN GUARDAR CAMBIOS ================= -->
+<div id="modalGuardarCambios" class="modal">
+  <div class="modal-card">
+    <h3>✅ Cambios Guardados</h3>
+    <p class="muted">Los precios se han guardado localmente en este dispositivo. ¡Excelente trabajo!</p>
+    <div class="btn-row">
+      <button type="button" onclick="cerrarModalGuardarCambios()">¡Perfecto!</button>
+    </div>
+  </div>
+</div>
 
 <!-- jsPDF -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
