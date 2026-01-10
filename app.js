@@ -4,6 +4,7 @@ const URLS = {
   logo: BASE_RAW + "logo.png",
   invP: BASE_RAW + "inventario.json",
   invA: BASE_RAW + "inventarioanexo.json",
+  invT: BASE_RAW + "inventariotienda.json",
   precios: BASE_RAW + "precios.json",
   preciosadmin: BASE_RAW + "preciosadmin.json",
   version: BASE_RAW + "inventario_version.json"
@@ -103,6 +104,9 @@ let logoDataUrlCache = null;
 let inventarioVersion = localStorage.getItem("inventarioVersion") || "0";
 let inventarioAdmin = [];
 
+// ADMIN home: INVENTARIO | COTIZACIONES
+let adminHomeMode = "INVENTARIO";
+
 /* ================= ELEMENTS ================= */
 const loginScreen = el("login");
 const appScreen = el("app");
@@ -183,7 +187,8 @@ function startApp(){
     operadorHome.classList.remove("hidden");
   } else if (role === "ADMIN") {
     headerTitle.textContent = "Inventario Admin";
-    abrirInventarioAdmin();
+    adminHomeMode = "INVENTARIO";
+    abrirConsultaInventarioVendedor();
   } else {
     contenido.classList.remove("hidden");
     contenido.innerHTML = `
@@ -207,15 +212,21 @@ async function checkVersionAndReload() {
   try {
     const versionData = await fetchJson(URLS.version);
     const newVersion = versionData.version || "0";
+
     if (newVersion !== inventarioVersion) {
       inventarioVersion = newVersion;
       localStorage.setItem("inventarioVersion", inventarioVersion);
+
+      // invalidar caches
       catalogoCargado = false;
       inventarioAdmin = [];
+
+      return true;
     }
   } catch (err) {
     console.warn("No se pudo cargar versión:", err);
   }
+  return false;
 }
 
 /* ================= MODAL VENDEDOR ================= */
@@ -260,53 +271,68 @@ async function ensureCatalogoCargado(){
 
   await checkVersionAndReload();
 
-  const [invP, invA, preciosadmin] = await Promise.all([
+  const [invP, invA, invT, preciosadmin] = await Promise.all([
     fetchJson(URLS.invP),
     fetchJson(URLS.invA),
+    fetchJson(URLS.invT),
     fetchJson(URLS.preciosadmin)
+  ]);
+
+  // ✅ aplicar cambios locales de ADMIN (si existen)
+  const preciosLocal = JSON.parse(localStorage.getItem("preciosModificadosAdmin") || "{}");
+
+  const codes = new Set([
+    ...Object.keys(invP || {}),
+    ...Object.keys(invA || {}),
+    ...Object.keys(invT || {}),
+    ...Object.keys(preciosadmin || {})
   ]);
 
   catalogo = [];
   catalogoMap = new Map();
   inventarioAdmin = [];
 
-  for (const codigo in invP) {
-    const p = invP[codigo];
-    const a = invA[codigo] || { cantidad: 0 };
-    const data = preciosadmin[codigo] || {};
+  for (const codigo of codes) {
+    const p = invP?.[codigo];
+    const a = invA?.[codigo];
+    const t = invT?.[codigo];
 
-    const stockP = Number(p.cantidad || 0);
-    const stockA = Number(a.cantidad || 0);
+    const base = p || t || a || {};
+    const data = preciosadmin?.[codigo] || {};
+    const local = preciosLocal?.[codigo] || {};
+
+    const merged = { ...data, ...local }; // local sobreescribe GitHub
+
+    const stockP = Number(p?.cantidad || 0);
+    const stockA = Number(a?.cantidad || 0);
+    const stockT = Number(t?.cantidad || 0);
 
     const obj = {
       codigo,
-      producto: p.producto || "",
-      departamento: p.departamento || "",
+      producto: base.producto || "",
+      departamento: base.departamento || "",
       stockP,
       stockA,
+      stockT,
       stockTotal: stockP + stockA,
       precios: {
-        precio: data.precio,
-        precioA: data.precioA,
-        precioB: data.precioB,
-        precioC: data.precioC,
-        mayoreo: data.mayoreo,
-        precioVendedor: data.precioVendedor || 0
+        precio: merged.precio,
+        precioA: merged.precioA,
+        precioB: merged.precioB,
+        precioC: merged.precioC,
+        mayoreo: merged.mayoreo,
+        precioVendedor: merged.precioVendedor || 0
       },
       admin: {
-        costo: Number(data.costo || 0),
-        limite: Number(data.limite || 0)
+        costo: Number(merged.costo ?? 0),
+        limite: Number(merged.limite ?? 0)
       }
     };
 
     catalogo.push(obj);
     catalogoMap.set(codigo, obj);
 
-    inventarioAdmin.push({
-      ...obj,
-      stockP,
-      stockA
-    });
+    inventarioAdmin.push(obj);
   }
 
   catalogo.sort((x,y) => (x.producto||"").localeCompare(y.producto||"", "es"));
@@ -611,10 +637,52 @@ function volverHome(){
   vendedorHome.classList.add("hidden");
   operadorHome.classList.add("hidden");
 
-  if (role === "VENDEDOR") vendedorHome.classList.remove("hidden");
-  else if (role === "OPERADOR" || role === "BODEGUERO") operadorHome.classList.remove("hidden");
-  else if (role === "ADMIN") abrirInventarioAdmin();
-  else vendedorHome.classList.remove("hidden");
+  if (role === "VENDEDOR") {
+    headerTitle.textContent = "Cotizaciones";
+    vendedorHome.classList.remove("hidden");
+    return;
+  }
+
+  if (role === "OPERADOR" || role === "BODEGUERO") {
+    headerTitle.textContent = (role === "BODEGUERO") ? "Bodeguero" : "Operador";
+    operadorHome.classList.remove("hidden");
+    return;
+  }
+
+  if (role === "ADMIN") {
+    if (adminHomeMode === "COTIZACIONES") abrirAdminCotizacionesHome();
+    else abrirConsultaInventarioVendedor();
+    return;
+  }
+
+  headerTitle.textContent = "Cotizaciones";
+  vendedorHome.classList.remove("hidden");
+}
+
+
+
+/* ================= ADMIN: HOME COTIZACIONES ================= */
+function abrirAdminCotizacionesHome(){
+  adminHomeMode = "COTIZACIONES";
+  headerTitle.textContent = "Cotizaciones";
+
+  vendedorHome.classList.add("hidden");
+  operadorHome.classList.add("hidden");
+  contenido.classList.remove("hidden");
+
+  contenido.innerHTML = `
+    <button type="button" class="secondary" onclick="abrirConsultaInventarioVendedor()">⬅ Volver a Inventario</button>
+
+    <div class="card">
+      <strong>⚙️ Administrador • Cotizaciones</strong>
+      <div class="muted">Módulo igual al vendedor.</div>
+    </div>
+
+    <button type="button" onclick="abrirCotizacion()">🧾 Nueva Cotización</button>
+    <button type="button" onclick="abrirClientes()">👤 Clientes</button>
+    <button type="button" onclick="abrirConsultaInventarioVendedor()">📦 Consulta de inventario</button>
+    <button type="button" class="secondary" onclick="abrirHistorialCotizaciones()">📑 Cotizaciones guardadas</button>
+  `;
 }
 
 /* ================= COTIZACIONES UI ================= */
@@ -3998,3 +4066,518 @@ function vaciarMovimientosOperador(){
   localStorage.setItem("conteos", "[]");
 }
 
+
+
+/* ================= CONSULTA INVENTARIO (VENDEDOR) ================= */
+let invVendConsulta = [];
+let invVendConsultaCargado = false;
+
+let invVendStockFiltro = localStorage.getItem("invVendStockFiltro") || "TODOS"; // TODOS | CON | SIN
+let invVendDept = "";    // ej: "FONTANERIA"
+let invVendCat = "";     // ej: "PVC"
+
+let invVendDeptCats = new Map(); // dept -> [cats]
+let deptoVendMode = "DEPT";      // DEPT | CAT
+let deptoVendDeptActual = "";    // dept seleccionado para ver categorías
+
+function splitDeptCat(depRaw){
+  const s = String(depRaw || "").trim();
+  if (!s) return { dept:"", cat:"" };
+
+  // "FONTANERIA -PVC" => dept "FONTANERIA", cat "PVC"
+  const parts = s.split("-");
+  if (parts.length < 2) return { dept: s.trim(), cat:"" };
+
+  const dept = (parts[0] || "").trim();
+  const cat = parts.slice(1).join("-").trim();
+  return { dept, cat };
+}
+
+async function ensureInventarioConsultaVendedorCargado(){
+  const changed = await checkVersionAndReload();
+  if (changed) invVendConsultaCargado = false;
+
+  if (invVendConsultaCargado) return;
+
+  const [invP, invA, invT] = await Promise.all([
+    fetchJson(URLS.invP),
+    fetchJson(URLS.invA),
+    fetchJson(URLS.invT)
+  ]);
+
+  const codes = new Set([
+    ...Object.keys(invP || {}),
+    ...Object.keys(invA || {}),
+    ...Object.keys(invT || {})
+  ]);
+
+  invVendConsulta = [];
+  invVendDeptCats = new Map();
+
+  for (const codigo of codes) {
+    const p = invP?.[codigo];
+    const a = invA?.[codigo];
+    const t = invT?.[codigo];
+
+    const producto = (p?.producto || t?.producto || a?.producto || "");
+    const depRaw = (p?.departamento || t?.departamento || a?.departamento || "");
+
+    const dc = splitDeptCat(depRaw);
+
+    const item = {
+      codigo,
+      producto,
+      departamentoRaw: depRaw,
+      dept: dc.dept,
+      cat: dc.cat,
+      stockP: Number(p?.cantidad || 0),
+      stockA: Number(a?.cantidad || 0),
+      stockT: Number(t?.cantidad || 0)
+    };
+
+    invVendConsulta.push(item);
+
+    const d = (dc.dept || "").trim();
+    if (d) {
+      if (!invVendDeptCats.has(d)) invVendDeptCats.set(d, new Set());
+      const c = (dc.cat || "").trim();
+      if (c) invVendDeptCats.get(d).add(c);
+    }
+  }
+
+  // convertir sets a arrays ordenadas
+  for (const [d, setCats] of invVendDeptCats.entries()) {
+    invVendDeptCats.set(d, Array.from(setCats).sort((x,y)=>String(x).localeCompare(String(y), "es")));
+  }
+
+  invVendConsulta.sort((x,y) => (x.producto || "").localeCompare(y.producto || "", "es"));
+  invVendConsultaCargado = true;
+}
+
+function abrirConsultaInventarioVendedor(){
+  const role = localStorage.getItem("role") || "";
+  const isAdmin = role === "ADMIN";
+
+  if (isAdmin) {
+    adminHomeMode = "INVENTARIO";
+    headerTitle.textContent = "Inventario Admin";
+  } else {
+    headerTitle.textContent = "Consulta de inventario";
+  }
+
+  vendedorHome.classList.add("hidden");
+  operadorHome.classList.add("hidden");
+  contenido.classList.remove("hidden");
+
+  const titulo = isAdmin ? "📦 Inventario (Admin)" : "📦 Consulta de inventario";
+  const sub = "Principal • Anexo • Tienda";
+
+  const adminActions = isAdmin ? `
+    <div style="display:flex; gap:10px; margin-bottom:10px;">
+      <button type="button" onclick="abrirAdminCotizacionesHome()">🧾 Cotizaciones</button>
+      <button type="button" class="secondary" onclick="exportarPreciosAExcelAdmin()">📊 Exportar precios</button>
+    </div>
+    <div class="muted" style="margin-top:-4px; margin-bottom:10px;">
+      Toca un producto para <b>ver/editar precios</b>.
+    </div>
+  ` : "";
+
+  contenido.innerHTML = `
+    <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
+
+    <div class="card">
+      <strong>${titulo}</strong>
+      <div class="muted">${sub}</div>
+    </div>
+
+    ${adminActions}
+
+    <input id="invVendSearch" placeholder="🔍 Buscar por código o nombre" />
+
+    <div class="filter-row">
+      <button type="button" class="secondary filter-btn" id="invVendF_TODOS" onclick="setInvVendStockFiltro('TODOS')">Todos</button>
+      <button type="button" class="secondary filter-btn" id="invVendF_CON" onclick="setInvVendStockFiltro('CON')">Con stock</button>
+      <button type="button" class="secondary filter-btn" id="invVendF_SIN" onclick="setInvVendStockFiltro('SIN')">Sin stock</button>
+    </div>
+
+    <button type="button" class="secondary" id="invVendDeptBtn" onclick="abrirModalDeptoVend()">🏷️ Filtrar por departamento (Todos)</button>
+
+    <div class="muted" id="invVendFiltrosInfo" style="margin-top:-2px; margin-bottom:10px;"></div>
+
+    <div id="invVendList"></div>
+  `;
+
+  el("invVendSearch")?.addEventListener("input", renderConsultaInventarioVendedor);
+
+  updateInvVendFilterButtons();
+  updateBtnDeptoVend();
+  updateInvVendFiltrosInfo();
+
+  el("invVendList").innerHTML = `<div class="card"><strong>⏳ Cargando inventario...</strong></div>`;
+
+  ensureInventarioConsultaVendedorCargado()
+    .then(async () => {
+      // ✅ en ADMIN precargar precios para abrir el modal rápido
+      if (isAdmin) {
+        try { await ensureCatalogoCargado(); } catch {}
+      }
+
+      updateInvVendFilterButtons();
+      updateBtnDeptoVend();
+      updateInvVendFiltrosInfo();
+      renderConsultaInventarioVendedor();
+    })
+    .catch(err => {
+      console.error(err);
+      el("invVendList").innerHTML = `
+        <div class="card">
+          <strong>❌ No se pudo cargar el inventario.</strong>
+          <div class="muted">Asegúrate que exista <b>inventariotienda.json</b> en GitHub.</div>
+          <div class="muted">Detalle: ${escapeHtml(err.message || err)}</div>
+        </div>
+      `;
+    });
+}
+
+function setInvVendStockFiltro(val){
+  invVendStockFiltro = String(val || "TODOS").toUpperCase();
+  localStorage.setItem("invVendStockFiltro", invVendStockFiltro);
+  updateInvVendFilterButtons();
+  updateInvVendFiltrosInfo();
+  renderConsultaInventarioVendedor();
+}
+
+function updateInvVendFilterButtons(){
+  ["TODOS","CON","SIN"].forEach(k => {
+    const btn = el("invVendF_" + k);
+    if (!btn) return;
+    btn.classList.toggle("active", invVendStockFiltro === k);
+  });
+}
+
+function updateBtnDeptoVend(){
+  const btn = el("invVendDeptBtn");
+  if (!btn) return;
+
+  if (!invVendDept) {
+    btn.textContent = "🏷️ Filtrar por departamento (Todos)";
+    return;
+  }
+
+  if (invVendDept && !invVendCat) {
+    btn.textContent = `🏷️ ${invVendDept} (todas)`;
+    return;
+  }
+
+  btn.textContent = `🏷️ ${invVendDept} - ${invVendCat}`;
+}
+
+function updateInvVendFiltrosInfo(){
+  const info = el("invVendFiltrosInfo");
+  if (!info) return;
+
+  const parts = [];
+  parts.push(`Stock: <b>${invVendStockFiltro === "TODOS" ? "Todos" : (invVendStockFiltro === "CON" ? "Con stock" : "Sin stock")}</b>`);
+
+  if (invVendDept) {
+    if (invVendCat) parts.push(`Depto: <b>${escapeHtml(invVendDept)} - ${escapeHtml(invVendCat)}</b>`);
+    else parts.push(`Depto: <b>${escapeHtml(invVendDept)}</b>`);
+  } else {
+    parts.push("Depto: <b>Todos</b>");
+  }
+
+  info.innerHTML = parts.join(" • ");
+}
+
+function renderConsultaInventarioVendedor(){
+  const cont = el("invVendList");
+  if (!cont) return;
+
+  const role = localStorage.getItem("role") || "";
+  const isAdmin = role === "ADMIN";
+
+  const q = (el("invVendSearch")?.value || "").toLowerCase().trim();
+
+  const filtrados = invVendConsulta
+    .filter(p => {
+      // buscador
+      if (q) {
+        const match =
+          (p.codigo || "").toLowerCase().includes(q) ||
+          (p.producto || "").toLowerCase().includes(q);
+        if (!match) return false;
+      }
+
+      // filtro stock (total)
+      const total = Number(p.stockP || 0) + Number(p.stockA || 0) + Number(p.stockT || 0);
+      if (invVendStockFiltro === "CON") return total > 0;
+      if (invVendStockFiltro === "SIN") return total <= 0;
+
+      return true;
+    })
+    .filter(p => {
+      // filtro dept/cat
+      if (!invVendDept) return true;
+      if ((p.dept || "").trim() !== invVendDept) return false;
+      if (invVendCat && (p.cat || "").trim() !== invVendCat) return false;
+      return true;
+    })
+    .slice(0, 250);
+
+  if (!filtrados.length) {
+    cont.innerHTML = `<div class="card"><strong>No hay resultados.</strong></div>`;
+    return;
+  }
+
+  cont.innerHTML = filtrados.map(p => {
+    const total = Number(p.stockP || 0) + Number(p.stockA || 0) + Number(p.stockT || 0);
+    const depTxt = (p.dept || "").trim()
+      ? `${escapeHtml(p.dept)}${(p.cat || "").trim() ? " - " + escapeHtml(p.cat) : ""}`
+      : "";
+
+    const codeEnc = encodeURIComponent(p.codigo || "");
+    const click = isAdmin
+      ? `onclick="abrirModalDetallesProductoDesdeConsulta('${codeEnc}')"`
+      : `onclick="abrirModalPreciosProductoVendedor('${codeEnc}')"`;
+
+
+    return `
+      <div class="ticket clickable" ${click}>
+        <div class="ticket-top">
+          <div>
+            <div class="ticket-title">${escapeHtml(p.producto || "—")}</div>
+            <div class="ticket-sub">
+              Código: <b>${escapeHtml(p.codigo)}</b>
+              ${depTxt ? ` • ${depTxt}` : ""}
+            </div>
+          </div>
+          <div class="ticket-total">Total: ${total}</div>
+        </div>
+
+        <div class="ticket-stocks">
+          <span class="pill pill-p">Principal: ${Number(p.stockP || 0)}</span>
+          <span class="pill pill-a">Anexo: ${Number(p.stockA || 0)}</span>
+          <span class="pill pill-t">Tienda: ${Number(p.stockT || 0)}</span>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+
+
+/* ===== Modal precios producto (consulta inventario) ===== */
+async function abrirModalPreciosProductoVendedor(codeEnc){
+  const codigo = decodeURIComponent(codeEnc || "");
+  if (!codigo) return;
+
+  try {
+    await ensureCatalogoCargado();
+  } catch (err) {
+    console.error(err);
+  }
+
+  const prod = catalogoMap.get(codigo);
+  if (!prod) {
+    alert("No se encontró el producto.");
+    return;
+  }
+
+  el("ppTitulo").textContent = prod.producto || "Producto";
+  const dep = (prod.departamento || "").trim();
+  el("ppSub").textContent = `Código: ${codigo}${dep ? " • " + dep : ""}`;
+
+  const preciosHtml = PRICE_TYPES.map(t => {
+    const label = PRICE_LABELS[t] || t;
+    const v = prod.precios?.[t];
+    const val = (v === undefined || v === null) ? "N/D" : moneyL(v);
+    return `<div class="k">${escapeHtml(label)}</div><div class="v">${escapeHtml(val)}</div>`;
+  }).join("");
+
+  el("ppPrecios").innerHTML = preciosHtml;
+
+  const limite = Number(prod.admin?.limite || 0);
+  el("ppLimite").innerHTML = `
+    <div class="k">Precio mínimo</div>
+    <div class="v">${limite > 0 ? moneyL(limite) : "No definido"}</div>
+  `;
+
+  openModal("modalPreciosProducto");
+}
+
+function cerrarModalPreciosProducto(){
+  closeModal("modalPreciosProducto");
+}
+
+/* ===== ADMIN: abrir modal editable desde consulta ===== */
+async function abrirModalDetallesProductoDesdeConsulta(codeEnc){
+  const codigo = decodeURIComponent(codeEnc || "");
+  if (!codigo) return;
+
+  try {
+    await ensureCatalogoCargado();
+  } catch (err) {
+    console.error(err);
+  }
+
+  abrirModalDetallesProducto(codigo);
+}
+
+/* ===== ADMIN: exportar precios a Excel (y compartir) ===== */
+async function exportarPreciosAExcelAdmin(){
+  try {
+    await ensureCatalogoCargado();
+  } catch (err) {
+    console.error(err);
+  }
+  exportarPreciosAExcel();
+}
+
+/* ===== Modal filtro Depto/Categoría (VENDEDOR) ===== */
+function abrirModalDeptoVend(){
+  // Si aún no carga, abrir con "cargando..."
+  openModal("modalDeptoVend");
+
+  deptoVendMode = "DEPT";
+  deptoVendDeptActual = "";
+
+  el("deptoVendTitulo").textContent = "Filtrar por departamento";
+  el("deptoVendBackBtn").style.display = "none";
+  el("deptoVendBuscar").value = "";
+
+  el("deptoVendLista").innerHTML = `<div class="list-item"><div class="list-title">⏳ Cargando...</div></div>`;
+
+  ensureInventarioConsultaVendedorCargado()
+    .then(() => {
+      renderDeptoVendLista();
+      setTimeout(() => el("deptoVendBuscar").focus(), 50);
+    })
+    .catch(err => {
+      el("deptoVendLista").innerHTML = `
+        <div class="list-item">
+          <div class="list-title">❌ Error al cargar</div>
+          <div class="list-sub">${escapeHtml(err.message || err)}</div>
+        </div>
+      `;
+    });
+
+  el("deptoVendBuscar").oninput = renderDeptoVendLista;
+}
+
+function cerrarModalDeptoVend(){
+  closeModal("modalDeptoVend");
+}
+
+function limpiarFiltroDeptoVend(){
+  invVendDept = "";
+  invVendCat = "";
+  updateBtnDeptoVend();
+  updateInvVendFiltrosInfo();
+  cerrarModalDeptoVend();
+  renderConsultaInventarioVendedor();
+}
+
+function deptoVendVolver(){
+  deptoVendMode = "DEPT";
+  deptoVendDeptActual = "";
+  el("deptoVendTitulo").textContent = "Filtrar por departamento";
+  el("deptoVendBackBtn").style.display = "none";
+  el("deptoVendBuscar").value = "";
+  renderDeptoVendLista();
+  el("deptoVendBuscar").focus();
+}
+
+function renderDeptoVendLista(){
+  const cont = el("deptoVendLista");
+  if (!cont) return;
+
+  const q = (el("deptoVendBuscar").value || "").toLowerCase().trim();
+
+  if (deptoVendMode === "DEPT") {
+    const depts = Array.from(invVendDeptCats.keys()).sort((a,b) => String(a).localeCompare(String(b), "es"));
+    const filtrados = depts.filter(d => !q || String(d).toLowerCase().includes(q));
+
+    cont.innerHTML = filtrados.length ? filtrados.map(d => {
+      const cats = invVendDeptCats.get(d) || [];
+      const hasCats = cats.length > 0;
+      return `
+        <div class="list-item" onclick="seleccionarDeptoVend('${encodeURIComponent(d)}')">
+          <div class="list-title">${escapeHtml(d)}</div>
+          <div class="list-sub">${hasCats ? "Tiene categorías" : "Sin categorías"}</div>
+        </div>
+      `;
+    }).join("") : `
+      <div class="list-item"><div class="list-title">No hay coincidencias</div></div>
+    `;
+    return;
+  }
+
+  // CAT
+  const cats = invVendDeptCats.get(deptoVendDeptActual) || [];
+  const base = ["__TODAS__", ...cats];
+  const filtrados = base.filter(c => {
+    if (!q) return true;
+    if (c === "__TODAS__") return "todas".includes(q);
+    return String(c).toLowerCase().includes(q);
+  });
+
+  cont.innerHTML = filtrados.length ? filtrados.map(c => {
+    if (c === "__TODAS__") {
+      return `
+        <div class="list-item" onclick="seleccionarCatVend('__TODAS__')">
+          <div class="list-title">Todas las categorías</div>
+          <div class="list-sub">Filtra solo por ${escapeHtml(deptoVendDeptActual)}</div>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="list-item" onclick="seleccionarCatVend('${encodeURIComponent(c)}')">
+        <div class="list-title">${escapeHtml(c)}</div>
+        <div class="list-sub">${escapeHtml(deptoVendDeptActual)} - ${escapeHtml(c)}</div>
+      </div>
+    `;
+  }).join("") : `
+    <div class="list-item"><div class="list-title">No hay coincidencias</div></div>
+  `;
+}
+
+function seleccionarDeptoVend(deptEnc){
+  const dept = decodeURIComponent(deptEnc || "");
+
+  invVendDept = dept;
+  invVendCat = "";
+
+  const cats = invVendDeptCats.get(dept) || [];
+  if (!cats.length) {
+    // ✅ no tiene categorías => cerrar y filtrar por dept
+    updateBtnDeptoVend();
+    updateInvVendFiltrosInfo();
+    cerrarModalDeptoVend();
+    renderConsultaInventarioVendedor();
+    return;
+  }
+
+  // ✅ tiene categorías => mostrar categorías
+  deptoVendMode = "CAT";
+  deptoVendDeptActual = dept;
+
+  el("deptoVendTitulo").textContent = `Categorías de ${dept}`;
+  el("deptoVendBackBtn").style.display = "inline-block";
+  el("deptoVendBuscar").value = "";
+  renderDeptoVendLista();
+  el("deptoVendBuscar").focus();
+}
+
+function seleccionarCatVend(catEnc){
+  if (catEnc === "__TODAS__") {
+    invVendCat = "";
+  } else {
+    invVendCat = decodeURIComponent(catEnc || "");
+  }
+
+  updateBtnDeptoVend();
+  updateInvVendFiltrosInfo();
+  cerrarModalDeptoVend();
+  renderConsultaInventarioVendedor();
+}
