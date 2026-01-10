@@ -14,7 +14,8 @@ const PINS = {
   OPERADOR: "CONTROL2025",
   VENDEDOR: "VENTAS2026",
   ADMIN: "ADMIN2024",
-  BODEGUERO: "1234"
+  BODEGUERO: "1234",
+  VISUALIZADOR: "VISUAL2026"
 };
 
 const EMPRESA_RTN = "0301-1964-008634";
@@ -178,6 +179,30 @@ function isOperadorLike(){
   return r === "OPERADOR" || r === "BODEGUERO";
 }
 
+
+function isVisualizador(){
+  return getRole() === "VISUALIZADOR";
+}
+
+// ✅ Buscar producto por código (case-insensitive)
+function getProdByCodigo(codigo){
+  const key = String(codigo || "").trim();
+  if (!key) return null;
+
+  return (
+    catalogoMap.get(key) ||
+    catalogoMap.get(key.toLowerCase()) ||
+    catalogoMap.get(key.toUpperCase()) ||
+    null
+  );
+}
+
+// ✅ Stock disponible (Principal + Anexo + Tienda)
+function stockDisponibleTotal(prod){
+  if (!prod) return 0;
+  return Number(prod.stockP || 0) + Number(prod.stockA || 0) + Number(prod.stockT || 0);
+}
+
 async function fetchJson(url){
   const res = await fetch(url, { cache: "no-store" });
   if(!res.ok) throw new Error(`HTTP ${res.status} - ${url}`);
@@ -290,6 +315,9 @@ function startApp(){
   } else if (role === "OPERADOR" || role === "BODEGUERO") {
     headerTitle.textContent = (role === "BODEGUERO") ? "Bodeguero" : "Operador";
     operadorHome.classList.remove("hidden");
+  } else if (role === "VISUALIZADOR" || role === "OPERADOR" || role === "BODEGUERO") {
+    headerTitle.textContent = "Inventario";
+    abrirConsultaInventarioVendedor();
   } else if (role === "ADMIN") {
     headerTitle.textContent = "Inventario Admin";
     adminHomeMode = "INVENTARIO";
@@ -300,7 +328,7 @@ function startApp(){
       <div class="card">
         <strong>⚠️ Rol no implementado</strong>
         <div style="color:#6B7280; margin-top:6px;">
-          Actualmente este módulo está listo para <b>VENDEDOR</b>, <b>OPERADOR</b>, <b>BODEGUERO</b> y <b>ADMIN</b>.
+          Actualmente este módulo está listo para <b>VENDEDOR</b>, <b>OPERADOR</b>, <b>BODEGUERO</b>, <b>VISUALIZADOR</b> y <b>ADMIN</b>.
         </div>
       </div>
     `;
@@ -419,7 +447,7 @@ async function ensureCatalogoCargado(){
       stockP,
       stockA,
       stockT,
-      stockTotal: stockP + stockA,
+      stockTotal: stockP + stockA + stockT,
       precios: {
         precio: merged.precio,
         precioA: merged.precioA,
@@ -436,6 +464,9 @@ async function ensureCatalogoCargado(){
 
     catalogo.push(obj);
     catalogoMap.set(codigo, obj);
+    // claves extra para evitar problemas por mayúsculas/minúsculas
+    catalogoMap.set(String(codigo).toLowerCase(), obj);
+    catalogoMap.set(String(codigo).toUpperCase(), obj);
 
     inventarioAdmin.push(obj);
   }
@@ -754,6 +785,12 @@ function volverHome(){
     return;
   }
 
+  if (role === "VISUALIZADOR") {
+    headerTitle.textContent = "Inventario";
+    abrirConsultaInventarioVendedor();
+    return;
+  }
+
   if (role === "ADMIN") {
     if (adminHomeMode === "COTIZACIONES") abrirAdminCotizacionesHome();
     else abrirConsultaInventarioVendedor();
@@ -923,7 +960,7 @@ function calcularTotal(){
   if (!cotizacionActual) return 0;
   let total = 0;
   for (const it of cotizacionActual.items) {
-    const prod = catalogoMap.get(it.codigo);
+    const prod = getProdByCodigo(it.codigo);
     const unit = getUnitPrice(prod, it);
     total += Number(it.qty || 0) * unit;
   }
@@ -940,7 +977,7 @@ function renderItems(){
   }
 
   wrap.innerHTML = cotizacionActual.items.map(it => {
-    const prod = catalogoMap.get(it.codigo);
+    const prod = getProdByCodigo(it.codigo);
     const unit = getUnitPrice(prod, it);
     const sub = Number(it.qty || 0) * unit;
 
@@ -961,7 +998,7 @@ function renderItems(){
           <div>
             <div class="item-name">${escapeHtml(prod?.producto || it.codigo)}</div>
             <div class="item-meta">
-              Código: ${escapeHtml(it.codigo)} • Stock: ${prod?.stockTotal ?? "?"}<br>
+              Código: ${escapeHtml(it.codigo)} • Stock disponible: ${prod ? stockDisponibleTotal(prod) : "?"}<br>
               Tipo: <b>${PRICE_LABELS[it.priceType]}</b> • P.Unit: <b>${moneyL(unit)}</b>
             </div>
           </div>
@@ -1135,28 +1172,53 @@ function renderProductosModal(){
   const cont = el("listaProductosModal");
 
   if (!q) {
-    cont.innerHTML = `<div class="list-item"><div class="list-title">Escribe para buscar productos…</div><div class="list-sub">Ej: “clavo”, “01-0002”</div></div>`;
+    cont.innerHTML = `
+      <div class="card">
+        <strong>Escribe para buscar productos…</strong>
+        <div class="muted">Ej: “clavo”, “01-0002”</div>
+      </div>
+    `;
     return;
   }
 
-  const encontrados = catalogo.filter(p =>
-    (p.codigo || "").toLowerCase().includes(q) ||
-    (p.producto || "").toLowerCase().includes(q)
-  ).slice(0, 30);
+  const encontrados = catalogo
+    .filter(p =>
+      (p.codigo || "").toLowerCase().includes(q) ||
+      (p.producto || "").toLowerCase().includes(q)
+    )
+    .slice(0, 40);
 
-  cont.innerHTML = encontrados.length ? encontrados.map(p => `
-    <div class="list-item" onclick="abrirModalAgregarProducto('${p.codigo}')">
-      <div class="list-title">${escapeHtml(p.producto)}</div>
-      <div class="list-sub">Código: ${escapeHtml(p.codigo)} • Stock: ${p.stockTotal}</div>
-    </div>
-  `).join("") : `<div class="list-item"><div class="list-title">No hay resultados</div></div>`;
+  cont.innerHTML = encontrados.length ? encontrados.map(p => {
+    const total = stockDisponibleTotal(p);
+
+    return `
+      <div class="ticket clickable" onclick="abrirModalAgregarProducto('${p.codigo}')">
+        <div class="ticket-top">
+          <div>
+            <div class="ticket-title">${escapeHtml(p.producto || "—")}</div>
+            <div class="ticket-sub">Código: <b>${escapeHtml(p.codigo)}</b></div>
+          </div>
+          <div class="ticket-total">Total: ${total}</div>
+        </div>
+
+        <div class="ticket-stocks">
+          <span class="pill pill-p">Principal: ${Number(p.stockP || 0)}</span>
+          <span class="pill pill-a">Anexo: ${Number(p.stockA || 0)}</span>
+          <span class="pill pill-t">Tienda: ${Number(p.stockT || 0)}</span>
+        </div>
+      </div>
+    `;
+  }).join("") : `
+    <div class="card"><strong>No hay resultados</strong></div>
+  `;
 }
+
 
 const buscarProductoModal = el("buscarProductoModal");
 if (buscarProductoModal) buscarProductoModal.addEventListener("input", renderProductosModal);
 
 function abrirModalAgregarProducto(codigo){
-  const prod = catalogoMap.get(codigo);
+  const prod = getProdByCodigo(codigo);
   if (!prod) return;
 
   cerrarModalProductos();
@@ -1164,7 +1226,7 @@ function abrirModalAgregarProducto(codigo){
   selectedProductCode = codigo;
 
   el("apTitulo").textContent = prod.producto;
-  el("apSub").textContent = `Código: ${prod.codigo} • Stock: ${prod.stockTotal}`;
+  el("apSub").textContent = `Código: ${prod.codigo} • P:${Number(prod.stockP||0)} A:${Number(prod.stockA||0)} T:${Number(prod.stockT||0)} • Total: ${stockDisponibleTotal(prod)}`;
 
   const preciosHtml = PRICE_TYPES
     .filter(t => t !== "precioVendedor")
@@ -1230,7 +1292,7 @@ if (apTipoPrecio) {
 }
 
 function confirmarAgregarProducto(){
-  const prod = catalogoMap.get(selectedProductCode);
+  const prod = getProdByCodigo(selectedProductCode);
   if (!prod) return;
 
   const qty = Math.max(1, Number(el("apCantidad").value || 1));
@@ -1283,7 +1345,7 @@ function buildCotizacionSnapshot(){
   const cliente = getClienteSeleccionado();
 
   const items = cotizacionActual.items.map(it => {
-    const prod = catalogoMap.get(it.codigo);
+    const prod = getProdByCodigo(it.codigo);
     const unit = getUnitPrice(prod, it);
     const qty = Number(it.qty || 0);
     return {
@@ -1882,38 +1944,9 @@ let opInvStockFiltro = localStorage.getItem("opInvStockFiltro") || "TODOS";
 
 /* ================= OPERADOR: INVENTARIO ================= */
 async function abrirInventarioOperador(){
-  vendedorHome.classList.add("hidden");
-  operadorHome.classList.add("hidden");
-  contenido.classList.remove("hidden");
-
-  contenido.innerHTML = `
-    <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
-
-    <div class="card">
-      <strong>📦 Inventario</strong>
-      <div class="muted">Busca por código o nombre. ${isBodeguero() ? "Muestra solo Anexo." : "Muestra Principal / Anexo / Total."}</div>
-    </div>
-
-    <input id="opBuscarInv" placeholder="🔍 Buscar por código o nombre" />
-
-    <div class="filter-row">
-      <button type="button" class="secondary filter-btn" id="opInvF_TODOS" onclick="setOpInvStockFiltro('TODOS')">Todos</button>
-      <button type="button" class="secondary filter-btn" id="opInvF_CON" onclick="setOpInvStockFiltro('CON')">Con stock</button>
-      <button type="button" class="secondary filter-btn" id="opInvF_SIN" onclick="setOpInvStockFiltro('SIN')">Sin stock</button>
-    </div>
-
-    <div class="inventario-list" id="opListaInv"></div>
-  `;
-
-  await ensureCatalogoCargado();
-
-  const input = el("opBuscarInv");
-  if (input) input.addEventListener("input", renderInventarioOperador);
-
-  updateInvFilterButtons();
-  renderInventarioOperador();
+  // ✅ Inventario tipo tickets (igual que VISUALIZADOR). Sin precios.
+  abrirConsultaInventarioVendedor();
 }
-
 
 
 function setOpInvStockFiltro(val){
@@ -2092,7 +2125,7 @@ async function abrirEntradasOperadorEditar(movId){
   const items = Array.isArray(d.items) ? d.items : [];
   items.forEach(x => {
     const codigo = String(x.codigo || "").trim();
-    const prod = catalogoMap.get(codigo);
+    const prod = getProdByCodigo(codigo);
     entradaFactura.items.push({
       id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
       codigo,
@@ -2292,7 +2325,7 @@ function updateSugerenciasEntrada(filaId){
   const formatted = formatCodigoAutoGuion(raw);
 
   // Si ya existe exacto, ocultar sugerencias
-  if (formatted && catalogoMap.has(formatted)) {
+  if (formatted && getProdByCodigo(formatted)) {
     cont.innerHTML = "";
     return;
   }
@@ -2332,7 +2365,7 @@ function seleccionarSugerenciaEntrada(filaId, codigoEnc){
   if (!it) return;
 
   it.codigo = codigo;
-  const prod = catalogoMap.get(codigo);
+  const prod = getProdByCodigo(codigo);
   it.producto = prod ? (prod.producto || "") : "";
 
   const codeInput = el("opCodigo_" + filaId);
@@ -2356,7 +2389,7 @@ function onCodigoEntradaInput(id, value){
   const input = el("opCodigo_" + id);
   if (input && input.value !== formatted) input.value = formatted;
 
-  const prod = catalogoMap.get(formatted);
+  const prod = getProdByCodigo(formatted);
   it.producto = prod ? (prod.producto || "") : "";
 
   const prodInput = el("opProd_" + id);
@@ -2427,7 +2460,7 @@ function seleccionarProductoOperador(codigo){
   if (!operadorFilaActivaId) return;
 
   const codigoFmt = String(codigo || "").trim();
-  const prod = catalogoMap.get(codigoFmt);
+  const prod = getProdByCodigo(codigoFmt);
   const nombre = prod ? (prod.producto || "") : "";
 
   // ✅ Selección desde el modal "Agregar producto"
@@ -2576,7 +2609,7 @@ function onAddMovCodigoInput(val){
 
   if (codeEl && codeEl.value !== formatted) codeEl.value = formatted;
 
-  const prod = catalogoMap.get(formatted);
+  const prod = getProdByCodigo(formatted);
   if (prodEl) prodEl.value = prod ? (prod.producto || "") : "";
 
   updateSugerenciasAddMov();
@@ -2590,7 +2623,7 @@ function updateSugerenciasAddMov(){
   const formatted = formatCodigoAutoGuion(raw);
 
   // Si ya existe exacto, ocultar sugerencias
-  if (formatted && catalogoMap.has(formatted)) {
+  if (formatted && getProdByCodigo(formatted)) {
     cont.innerHTML = "";
     return;
   }
@@ -2632,7 +2665,7 @@ function seleccionarSugerenciaAddMov(codigoEnc){
 
   if (codeEl) codeEl.value = codigo;
 
-  const prod = catalogoMap.get(codigo);
+  const prod = getProdByCodigo(codigo);
   if (prodEl) prodEl.value = prod ? (prod.producto || "") : "";
 
   const cont = el("addMovSug");
@@ -2645,7 +2678,7 @@ function confirmarAddMovItem(){
   const codigoRaw = el("addMovCodigo")?.value || "";
   const codigo = formatCodigoAutoGuion(codigoRaw);
 
-  const prod = catalogoMap.get(codigo);
+  const prod = getProdByCodigo(codigo);
   if (!codigo || !prod) {
     alert("Selecciona un producto válido.");
     return;
@@ -2861,7 +2894,7 @@ async function abrirSalidasOperadorEditar(movId){
   const items = Array.isArray(d.items) ? d.items : [];
   items.forEach(x => {
     const codigo = String(x.codigo || "").trim();
-    const prod = catalogoMap.get(codigo);
+    const prod = getProdByCodigo(codigo);
     salidaFactura.items.push({
       id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
       codigo,
@@ -3016,7 +3049,7 @@ function onCodigoSalidaInput(id, value){
   const input = el("opSCodigo_" + id);
   if (input && input.value !== formatted) input.value = formatted;
 
-  const prod = catalogoMap.get(formatted);
+  const prod = getProdByCodigo(formatted);
   it.producto = prod ? (prod.producto || "") : "";
 
   const prodInput = el("opSProd_" + id);
@@ -3074,7 +3107,7 @@ function seleccionarSugerenciaSalida(filaId, codigo){
   const it = salidaFactura.items.find(x => x.id === filaId);
   if (!it) return;
 
-  const prod = catalogoMap.get(codigoFmt);
+  const prod = getProdByCodigo(codigoFmt);
   it.codigo = codigoFmt;
   it.producto = prod ? (prod.producto || "") : "";
 
@@ -3098,7 +3131,7 @@ function actualizarPreviewSalida(){
     .filter(x => (x.codigo || "").trim() && Number(x.cantidad || 0) > 0)
     .map(x => ({
       codigo: x.codigo,
-      producto: x.producto || (catalogoMap.get(x.codigo)?.producto || ""),
+      producto: x.producto || (getProdByCodigo(x.codigo)?.producto || ""),
       cantidad: Number(x.cantidad || 0)
     }));
 
@@ -3240,7 +3273,7 @@ async function abrirTransferenciasOperadorEditar(movId){
   const items = Array.isArray(d.items) ? d.items : [];
   items.forEach(x => {
     const codigo = String(x.codigo || "").trim();
-    const prod = catalogoMap.get(codigo);
+    const prod = getProdByCodigo(codigo);
     transferenciaDoc.items.push({
       id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
       codigo,
@@ -3403,7 +3436,7 @@ function onCodigoTransferInput(id, value){
   const input = el("opTCodigo_" + id);
   if (input && input.value !== formatted) input.value = formatted;
 
-  const prod = catalogoMap.get(formatted);
+  const prod = getProdByCodigo(formatted);
   it.producto = prod ? (prod.producto || "") : "";
 
   const prodInput = el("opTProd_" + id);
@@ -3461,7 +3494,7 @@ function seleccionarSugerenciaTransferencia(filaId, codigo){
   const it = transferenciaDoc.items.find(x => x.id === filaId);
   if (!it) return;
 
-  const prod = catalogoMap.get(codigoFmt);
+  const prod = getProdByCodigo(codigoFmt);
   it.codigo = codigoFmt;
   it.producto = prod ? (prod.producto || "") : "";
 
@@ -3486,7 +3519,7 @@ function actualizarPreviewTransferencia(){
     .filter(x => (x.codigo || "").trim() && Number(x.cantidad || 0) > 0)
     .map(x => ({
       codigo: x.codigo,
-      producto: x.producto || (catalogoMap.get(x.codigo)?.producto || ""),
+      producto: x.producto || (getProdByCodigo(x.codigo)?.producto || ""),
       cantidad: Number(x.cantidad || 0)
     }));
 
@@ -3628,7 +3661,7 @@ async function abrirConteosOperadorEditar(movId){
   const items = Array.isArray(d.items) ? d.items : [];
   items.forEach(x => {
     const codigo = String(x.codigo || "").trim();
-    const prod = catalogoMap.get(codigo);
+    const prod = getProdByCodigo(codigo);
     conteoDoc.items.push({
       id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
       codigo,
@@ -3778,7 +3811,7 @@ function onCodigoConteoInput(id, value){
   const input = el("opCCodigo_" + id);
   if (input && input.value !== formatted) input.value = formatted;
 
-  const prod = catalogoMap.get(formatted);
+  const prod = getProdByCodigo(formatted);
   it.producto = prod ? (prod.producto || "") : "";
 
   const prodInput = el("opCProd_" + id);
@@ -3836,7 +3869,7 @@ function seleccionarSugerenciaConteo(filaId, codigo){
   const it = conteoDoc.items.find(x => x.id === filaId);
   if (!it) return;
 
-  const prod = catalogoMap.get(codigoFmt);
+  const prod = getProdByCodigo(codigoFmt);
   it.codigo = codigoFmt;
   it.producto = prod ? (prod.producto || "") : "";
 
@@ -3860,7 +3893,7 @@ function actualizarPreviewConteo(){
   const itemsOk = f.items
     .filter(x => (x.codigo || "").trim() && String(x.cantidad).trim() !== "" )
     .map(x => {
-      const prod = catalogoMap.get(x.codigo);
+      const prod = getProdByCodigo(x.codigo);
       return {
         codigo: x.codigo,
         producto: x.producto || (prod ? (prod.producto || "") : ""),
@@ -4426,6 +4459,8 @@ function abrirConsultaInventarioVendedor(){
   if (isAdmin) {
     adminHomeMode = "INVENTARIO";
     headerTitle.textContent = "Inventario Admin";
+  } else if (role === "VISUALIZADOR" || role === "OPERADOR" || role === "BODEGUERO") {
+    headerTitle.textContent = "Inventario";
   } else {
     headerTitle.textContent = "Consulta de inventario";
   }
@@ -4434,8 +4469,9 @@ function abrirConsultaInventarioVendedor(){
   operadorHome.classList.add("hidden");
   contenido.classList.remove("hidden");
 
-  const titulo = isAdmin ? "📦 Inventario (Admin)" : "📦 Consulta de inventario";
-  const sub = "Principal • Anexo • Tienda";
+  const titulo = isAdmin ? "📦 Inventario (Admin)" : ((role === "VISUALIZADOR" || role === "OPERADOR" || role === "BODEGUERO") ? "📦 Inventario" : "📦 Consulta de inventario");
+  const onlyA = role === "BODEGUERO";
+  const sub = onlyA ? "Bodega Anexo" : "Principal • Anexo • Tienda";
 
   const adminActions = isAdmin ? `
     <div style="display:flex; gap:10px; margin-bottom:10px;">
@@ -4560,6 +4596,7 @@ function renderConsultaInventarioVendedor(){
 
   const role = localStorage.getItem("role") || "";
   const isAdmin = role === "ADMIN";
+  const isBode = role === "BODEGUERO";
 
   const q = (el("invVendSearch")?.value || "").toLowerCase().trim();
 
@@ -4574,10 +4611,12 @@ function renderConsultaInventarioVendedor(){
       }
 
       // filtro stock (total)
-      const total = Number(p.stockP || 0) + Number(p.stockA || 0) + Number(p.stockT || 0);
+      const total = isBode
+        ? Number(p.stockA || 0)
+        : (Number(p.stockP || 0) + Number(p.stockA || 0) + Number(p.stockT || 0));
+
       if (invVendStockFiltro === "CON") return total > 0;
       if (invVendStockFiltro === "SIN") return total <= 0;
-
       return true;
     })
     .filter(p => {
@@ -4595,19 +4634,39 @@ function renderConsultaInventarioVendedor(){
   }
 
   cont.innerHTML = filtrados.map(p => {
-    const total = Number(p.stockP || 0) + Number(p.stockA || 0) + Number(p.stockT || 0);
+    const total = isBode
+      ? Number(p.stockA || 0)
+      : (Number(p.stockP || 0) + Number(p.stockA || 0) + Number(p.stockT || 0));
+
     const depTxt = (p.dept || "").trim()
       ? `${escapeHtml(p.dept)}${(p.cat || "").trim() ? " - " + escapeHtml(p.cat) : ""}`
       : "";
 
     const codeEnc = encodeURIComponent(p.codigo || "");
-    const click = isAdmin
-      ? `onclick="abrirModalDetallesProductoDesdeConsulta('${codeEnc}')"`
-      : `onclick="abrirModalPreciosProductoVendedor('${codeEnc}')"`;
 
+    let click = "";
+    let cls = "ticket";
+
+    if (isAdmin) {
+      click = `onclick="abrirModalDetallesProductoDesdeConsulta('${codeEnc}')"`;
+      cls = "ticket clickable";
+    } else if (role === "VENDEDOR") {
+      click = `onclick="abrirModalPreciosProductoVendedor('${codeEnc}')"`;
+      cls = "ticket clickable";
+    }
+
+    const totalLabel = isBode ? "Anexo" : "Total";
+
+    const stocksHtml = isBode
+      ? `<span class="pill pill-a">Anexo: ${Number(p.stockA || 0)}</span>`
+      : `
+          <span class="pill pill-p">Principal: ${Number(p.stockP || 0)}</span>
+          <span class="pill pill-a">Anexo: ${Number(p.stockA || 0)}</span>
+          <span class="pill pill-t">Tienda: ${Number(p.stockT || 0)}</span>
+        `;
 
     return `
-      <div class="ticket clickable" ${click}>
+      <div class="${cls}" ${click}>
         <div class="ticket-top">
           <div>
             <div class="ticket-title">${escapeHtml(p.producto || "—")}</div>
@@ -4616,19 +4675,14 @@ function renderConsultaInventarioVendedor(){
               ${depTxt ? ` • ${depTxt}` : ""}
             </div>
           </div>
-          <div class="ticket-total">Total: ${total}</div>
+          <div class="ticket-total">${totalLabel}: ${total}</div>
         </div>
 
-        <div class="ticket-stocks">
-          <span class="pill pill-p">Principal: ${Number(p.stockP || 0)}</span>
-          <span class="pill pill-a">Anexo: ${Number(p.stockA || 0)}</span>
-          <span class="pill pill-t">Tienda: ${Number(p.stockT || 0)}</span>
-        </div>
+        <div class="ticket-stocks">${stocksHtml}</div>
       </div>
     `;
   }).join("");
 }
-
 
 
 /* ===== Modal precios producto (consulta inventario) ===== */
@@ -4642,7 +4696,7 @@ async function abrirModalPreciosProductoVendedor(codeEnc){
     console.error(err);
   }
 
-  const prod = catalogoMap.get(codigo);
+  const prod = getProdByCodigo(codigo);
   if (!prod) {
     alert("No se encontró el producto.");
     return;
