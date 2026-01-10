@@ -736,3 +736,7 @@ main{ padding:12px; }
   white-space:pre-wrap;
 }
 
+/* ---------- Tickets dentro de listas en modal ---------- */
+.modal-list .ticket{
+  margin-bottom: 8px;
+}
