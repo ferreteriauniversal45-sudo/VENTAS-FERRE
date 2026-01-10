@@ -58,6 +58,7 @@
     <div id="vendedorHome" class="hidden">
       <button type="button" onclick="abrirCotizacion()">🧾 Nueva Cotización</button>
       <button type="button" onclick="abrirClientes()">👤 Clientes</button>
+      <button type="button" onclick="abrirConsultaInventarioVendedor()">📦 Consulta de inventario</button>
       <button type="button" class="secondary" onclick="abrirHistorialCotizaciones()">📑 Cotizaciones guardadas</button>
     </div>
 
@@ -259,6 +260,47 @@
     </div>
   </div>
 </div>
+
+
+<!-- ================= MODAL: FILTRO DEPTO/CATEG (VENDEDOR) ================= -->
+<div id="modalDeptoVend" class="modal">
+  <div class="modal-card">
+    <h3 id="deptoVendTitulo">Filtrar por departamento</h3>
+    <input id="deptoVendBuscar" placeholder="🔍 Buscar" />
+    <div id="deptoVendLista" class="modal-list"></div>
+
+    <div class="btn-row">
+      <button type="button" class="secondary" id="deptoVendBackBtn" onclick="deptoVendVolver()" style="display:none;">⬅ Atrás</button>
+      <button type="button" class="secondary" onclick="limpiarFiltroDeptoVend()">Ver todos</button>
+      <button type="button" class="secondary" onclick="cerrarModalDeptoVend()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ================= MODAL: PRECIOS DEL PRODUCTO (CONSULTA INVENTARIO) ================= -->
+<div id="modalPreciosProducto" class="modal">
+  <div class="modal-card">
+    <h3 id="ppTitulo">Producto</h3>
+    <p id="ppSub" class="muted"></p>
+
+    <div class="card-lite">
+      <strong>💲 Precios</strong>
+      <div id="ppPrecios" class="prices-list" style="margin-top:8px;"></div>
+    </div>
+
+    <div class="card-lite">
+      <strong>📌 Límite</strong>
+      <div id="ppLimite" class="prices-list" style="margin-top:8px;"></div>
+    </div>
+
+    <div class="btn-row">
+      <button type="button" class="secondary" onclick="cerrarModalPreciosProducto()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+
 
 <!-- jsPDF -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
