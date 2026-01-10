@@ -58,6 +58,109 @@ function escapeHtml(s){
 function openModal(id){ el(id).classList.add("show"); }
 function closeModal(id){ el(id).classList.remove("show"); }
 
+
+
+/* ================= UI MODALS (alert/confirm bonitos) ================= */
+let __uiAlertResolver = null;
+let __uiConfirmResolver = null;
+
+function uiGuessIcon(message, fallback){
+  const s = String(message ?? "").trim();
+  if (!s) return fallback || "ℹ️";
+  const first = s[0];
+  const icons = ["✅","❌","⚠️","🗑️","ℹ️","📌","📦","📄","🧾"];
+  return icons.includes(first) ? first : (fallback || "ℹ️");
+}
+
+function uiAlert(message, opts = {}){
+  const title = opts.title || "Mensaje";
+  const icon = opts.icon || uiGuessIcon(message, "ℹ️");
+
+  // fallback si no existen elementos
+  if (!el("modalUiAlert") || !el("uiAlertText")) {
+    try { window.__nativeAlert ? window.__nativeAlert(message) : console.log(message); } catch {}
+    return Promise.resolve();
+  }
+
+  el("uiAlertTitle").textContent = title;
+  el("uiAlertIcon").textContent = icon;
+  el("uiAlertText").textContent = String(message ?? "");
+
+  openModal("modalUiAlert");
+
+  return new Promise(resolve => {
+    __uiAlertResolver = resolve;
+  });
+}
+
+function uiAlertClose(){
+  closeModal("modalUiAlert");
+  if (__uiAlertResolver) {
+    const r = __uiAlertResolver;
+    __uiAlertResolver = null;
+    r();
+  }
+}
+
+function uiConfirm(message, opts = {}){
+  const title = opts.title || "Confirmar";
+  const icon = opts.icon || uiGuessIcon(message, "⚠️");
+  const okText = opts.okText || "Aceptar";
+  const cancelText = opts.cancelText || "Cancelar";
+
+  if (!el("modalUiConfirm") || !el("uiConfirmText")) {
+    // fallback
+    const res = window.__nativeConfirm ? window.__nativeConfirm(message) : true;
+    return Promise.resolve(!!res);
+  }
+
+  el("uiConfirmTitle").textContent = title;
+  el("uiConfirmIcon").textContent = icon;
+  el("uiConfirmText").textContent = String(message ?? "");
+  el("uiConfirmOkBtn").textContent = okText;
+
+  // set cancel text
+  const cancelBtn = el("modalUiConfirm").querySelector("button.secondary");
+  if (cancelBtn) cancelBtn.textContent = cancelText;
+
+  openModal("modalUiConfirm");
+
+  return new Promise(resolve => {
+    __uiConfirmResolver = resolve;
+  });
+}
+
+function uiConfirmOk(){
+  closeModal("modalUiConfirm");
+  if (__uiConfirmResolver) {
+    const r = __uiConfirmResolver;
+    __uiConfirmResolver = null;
+    r(true);
+  }
+}
+
+function uiConfirmCancel(){
+  closeModal("modalUiConfirm");
+  if (__uiConfirmResolver) {
+    const r = __uiConfirmResolver;
+    __uiConfirmResolver = null;
+    r(false);
+  }
+}
+
+// Reemplazar alert nativo (evita "https://... dice")
+(function(){
+  if (!window.__nativeAlert) window.__nativeAlert = window.alert.bind(window);
+  if (!window.__nativeConfirm) window.__nativeConfirm = window.confirm.bind(window);
+
+  window.alert = function(message){
+    try {
+      uiAlert(String(message ?? ""));
+    } catch (e) {
+      try { window.__nativeAlert(message); } catch {}
+    }
+  };
+})();
 function nowStr(){
   return new Date().toLocaleString("es-HN");
 }
@@ -94,6 +197,8 @@ let catalogoMap = new Map();
 let catalogoCargado = false;
 
 let cotizacionActual = null;
+let cotizacionEditMode = false; // ✅ true cuando editas una cotización guardada
+
 let pendingAction = null;
 
 let selectedProductCode = null;
@@ -351,7 +456,7 @@ async function abrirInventarioAdmin() {
 
     if (inventarioAdmin.length === 0) {
       contenido.innerHTML = `
-        <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
+        <button type="button" class="secondary" onclick="volverDesdeCotizacion()">⬅ Volver</button>
         <div class="card">
           <strong>❌ No se pudo cargar el inventario.</strong>
           <div class="muted">Revisa tu conexión a internet o contacta soporte.</div>
@@ -698,6 +803,7 @@ function abrirCotizacion(){
 
   ensureCatalogoCargado()
     .then(() => {
+      cotizacionEditMode = false;
       cotizacionActual = {
         id: Date.now(),
         fecha: nowStr(),
@@ -722,6 +828,14 @@ function getClienteSeleccionado(){
   return clientes.find(c => String(c.id) === String(cotizacionActual?.clienteId)) || null;
 }
 
+function volverDesdeCotizacion(){
+  if (cotizacionEditMode) {
+    abrirHistorialCotizaciones();
+    return;
+  }
+  volverHome();
+}
+
 function renderCotizacion(){
   const cliente = getClienteSeleccionado();
 
@@ -733,6 +847,7 @@ function renderCotizacion(){
       <div class="item-meta">#${cotizacionActual.id} • ${escapeHtml(cotizacionActual.fecha)}</div>
       <div style="margin-top:8px;">
         <span class="badge">SOLO COTIZACIÓN • SIN VALIDEZ FISCAL</span>
+        ${cotizacionEditMode ? `<div style="margin-top:8px;"><span class="badge">COTIZACIÓN EDITADA</span></div>` : ""}
       </div>
     </div>
 
@@ -762,7 +877,7 @@ function renderCotizacion(){
 
     <div style="height:10px"></div>
 
-    <button type="button" onclick="guardarCotizacion()">💾 Guardar cotización</button>
+    <button type="button" onclick="guardarCotizacion()">${cotizacionEditMode ? "💾 Guardar cambios" : "💾 Guardar cotización"}</button>
     <button type="button" class="secondary" onclick="generarPdfCotizacion()">📄 Generar PDF</button>
   `;
 
@@ -1197,9 +1312,46 @@ function buildCotizacionSnapshot(){
     } : null,
     items,
     total,
+    editada: !!cotizacionEditMode,
+    editadaEn: cotizacionEditMode ? nowStr() : "",
     disclaimer: "ESTE DOCUMENTO ES SOLO UNA COTIZACIÓN Y NO TIENE VALIDEZ FISCAL"
   };
 }
+
+
+/* ================= COTIZACIONES: UPSERT (evita duplicados) ================= */
+function upsertCotizacionSnapshot(snap, opts = {}){
+  const silent = !!opts.silent;
+
+  if (!snap || !snap.id) return;
+
+  cotizaciones = JSON.parse(localStorage.getItem("cotizaciones") || "[]");
+
+  const idx = cotizaciones.findIndex(c => String(c.id) === String(snap.id));
+
+  if (idx >= 0) {
+    const prev = cotizaciones[idx] || {};
+    const merged = { ...prev, ...snap };
+
+    // mantener editada si ya lo estaba
+    merged.editada = !!(prev.editada || snap.editada);
+
+    if (merged.editada) {
+      merged.editadaEn = snap.editadaEn || prev.editadaEn || nowStr();
+    }
+
+    cotizaciones[idx] = merged;
+  } else {
+    cotizaciones.unshift(snap);
+  }
+
+  localStorage.setItem("cotizaciones", JSON.stringify(cotizaciones));
+
+  if (!silent) {
+    uiAlert("✅ Cotización guardada localmente.", { title: "Guardado", icon: "✅" });
+  }
+}
+
 
 function guardarCotizacion(skipNameCheck = false){
   if (!skipNameCheck) {
@@ -1212,9 +1364,7 @@ function guardarCotizacion(skipNameCheck = false){
   }
 
   const snap = buildCotizacionSnapshot();
-  cotizaciones.unshift(snap);
-  localStorage.setItem("cotizaciones", JSON.stringify(cotizaciones));
-  alert("✅ Cotización guardada localmente.");
+  upsertCotizacionSnapshot(snap);
 }
 
 /* ================= PDF ================= */
@@ -1293,6 +1443,13 @@ async function crearPdfCotizacion(cot){
     } catch {}
 
     doc.text("SOLO COTIZACIÓN", 40, 140, { align: "center", angle: 45 });
+
+    // ✅ Si fue editada, agregar segunda marca de agua
+    if (cot && cot.editada) {
+      doc.setFontSize(14);
+      doc.text("COTIZACIÓN EDITADA", 40, 160, { align: "center", angle: 45 });
+      doc.setFontSize(18);
+    }
 
     try {
       if (GState) doc.setGState(new GState({ opacity: 1 }));
@@ -1437,6 +1594,14 @@ async function crearPdfCotizacion(cot){
   doc.text(legalLines, 40, y, { align: "center" });
 
   const blob = doc.output("blob");
+
+  // ✅ Guardar automáticamente la cotización al generar el PDF (sin duplicar)
+  try {
+    upsertCotizacionSnapshot(cot, { silent: true });
+  } catch (e) {
+    console.warn("No se pudo auto-guardar la cotización:", e);
+  }
+
   setLastFile(blob, `cotizacion-${cot.id}.pdf`, "Cotización - Ferretería Universal", "Cotización (sin validez fiscal)");
 
   mostrarPdfPreview();
@@ -1557,13 +1722,112 @@ function abrirHistorialCotizaciones(){
         <strong>🧾 #${c.id} • ${moneyL(c.total)}</strong>
         <div class="item-meta">
           ${escapeHtml(c.fecha)}<br>
-          ${c.cliente?.nombre ? `Cliente: ${escapeHtml(c.cliente.nombre)}` : "Sin cliente"}
+          ${c.cliente?.nombre ? `Cliente: ${escapeHtml(c.cliente.nombre)}` : "Sin cliente"}${c.editada ? "<br><span class=\"badge\">EDITADA</span>" : ""}
         </div>
-        <button type="button" class="secondary" onclick="generarPdfDesdeGuardada(${c.id})">📄 Generar PDF</button>
+        <div class="btn-row">
+          <button type="button" class="secondary" onclick="editarCotizacionGuardada(${c.id})">✏️ Editar</button>
+          <button type="button" onclick="generarPdfDesdeGuardada(${c.id})">📄 Generar PDF</button>
+        </div>
       </div>
     `).join("")}
   `;
 }
+
+
+async function editarCotizacionGuardada(id){
+  vendedorHome.classList.add("hidden");
+  operadorHome.classList.add("hidden");
+  contenido.classList.remove("hidden");
+
+  contenido.innerHTML = `
+    <button type="button" class="secondary" onclick="abrirHistorialCotizaciones()">⬅ Volver</button>
+    <div class="card"><strong>⏳ Cargando cotización...</strong></div>
+  `;
+
+  try {
+    await ensureCatalogoCargado();
+  } catch (e) {
+    console.error(e);
+    alert("❌ No se pudo cargar el catálogo. Revisa tu conexión.");
+    return;
+  }
+
+  cotizaciones = JSON.parse(localStorage.getItem("cotizaciones") || "[]");
+  clientes = JSON.parse(localStorage.getItem("clientes") || "[]");
+
+  const c = cotizaciones.find(x => String(x.id) === String(id));
+  if (!c) {
+    alert("No se encontró la cotización guardada.");
+    return;
+  }
+
+  // marcar modo edición (para marca de agua en PDF)
+  cotizacionEditMode = true;
+
+  // asegurar cliente en la lista para poder usar el selector normal
+  let clienteId = "";
+  if (c.cliente) {
+    const norm = (s) => String(s || "").trim().toLowerCase();
+
+    let found = null;
+
+    // 1) RTN exacto (si existe)
+    if (c.cliente.rtn && norm(c.cliente.rtn)) {
+      found = clientes.find(x => norm(x.rtn) === norm(c.cliente.rtn));
+    }
+
+    // 2) Teléfono + nombre
+    if (!found && c.cliente.telefono && norm(c.cliente.telefono)) {
+      found = clientes.find(x =>
+        norm(x.telefono) === norm(c.cliente.telefono) &&
+        norm(x.nombre) === norm(c.cliente.nombre)
+      );
+    }
+
+    // 3) Nombre + empresa
+    if (!found && c.cliente.nombre) {
+      found = clientes.find(x =>
+        norm(x.nombre) === norm(c.cliente.nombre) &&
+        norm(x.empresa) === norm(c.cliente.empresa)
+      );
+    }
+
+    if (found) {
+      clienteId = found.id;
+    } else {
+      const nuevo = {
+        id: Date.now(),
+        nombre: c.cliente.nombre || "",
+        empresa: c.cliente.empresa || "",
+        telefono: c.cliente.telefono || "",
+        rtn: c.cliente.rtn || "",
+        ubicacion: c.cliente.ubicacion || ""
+      };
+      clientes.push(nuevo);
+      localStorage.setItem("clientes", JSON.stringify(clientes));
+      clienteId = nuevo.id;
+    }
+  }
+
+  cotizacionActual = {
+    id: c.id,
+    fecha: c.fecha,
+    clienteId,
+    items: (c.items || []).map(it => ({
+      id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
+      codigo: it.codigo || "",
+      qty: Math.max(1, Number(it.cantidad || 1)),
+      priceType: it.tipoPrecio || "precio",
+      customPrice: (it.tipoPrecio === "precioVendedor") ? Number(it.precioUnitario || 0) : 0
+    }))
+  };
+
+  // normalizar por si hay líneas duplicadas
+  normalizeItems();
+
+  renderCotizacion();
+}
+
 
 function generarPdfDesdeGuardada(id){
   const c = cotizaciones.find(x => x.id === id);
@@ -3851,13 +4115,14 @@ function editarMovimientoOperador(movId){
   alert("Este movimiento aún no tiene editor.");
 }
 
-function eliminarMovimientoOperador(movId){
+async function eliminarMovimientoOperador(movId){
   movimientos = JSON.parse(localStorage.getItem("movimientos") || "[]");
   const mov = movimientos.find(m => String(m.id) === String(movId));
   if (!mov) return;
 
   const label = movTipoLabel(mov.tipo);
-  if (!confirm(`¿Eliminar ${label} del ${mov.fecha}?`)) return;
+  const ok = await uiConfirm(`¿Eliminar ${label} del ${mov.fecha}?`, { title: "Eliminar", icon: "🗑️", okText: "Eliminar", cancelText: "Cancelar" });
+  if (!ok) return;
 
   // quitar de movimientos
   movimientos = movimientos.filter(m => String(m.id) !== String(movId));
