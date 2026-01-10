@@ -13,6 +13,8 @@ const URLS = {
 const PINS = {
   OPERADOR: "CONTROL2025",
   VENDEDOR: "VENTAS2026",
+  VENDEDOR_JULIO: "VENTASJULIO2026",
+  VENDEDOR_LEONARDI: "VENTASLEO2026",
   ADMIN: "ADMIN2024",
   BODEGUERO: "1234",
   VISUALIZADOR: "VISUAL2026"
@@ -184,6 +186,57 @@ function isVisualizador(){
   return getRole() === "VISUALIZADOR";
 }
 
+function isVendedorRole(role = getRole()){
+  return role === "VENDEDOR" || role === "VENDEDOR_JULIO" || role === "VENDEDOR_LEONARDI";
+}
+
+function getAllowedPriceTypes(role = getRole()){
+  // Por defecto: todo
+  let types = [...PRICE_TYPES];
+
+  // Restricciones por rol
+  if (role === "VENDEDOR_JULIO") {
+    // Julio: no puede usar PRECIO VENDEDOR
+    types = types.filter(t => t !== "precioVendedor");
+  }
+
+  if (role === "VENDEDOR_LEONARDI") {
+    // Leonardi: no puede usar PRECIO VENDEDOR ni MAYOREO
+    types = types.filter(t => t !== "precioVendedor" && t !== "mayoreo");
+  }
+
+  return types;
+}
+
+function sanitizeCotizacionPriceTypesForRole(){
+  if (!cotizacionActual || !Array.isArray(cotizacionActual.items)) return;
+
+  const role = getRole();
+  if (!isVendedorRole(role) && role !== "ADMIN") return; // solo aplica a cotizaciones
+
+  const allowed = getAllowedPriceTypes(role);
+  if (!allowed.length) return;
+
+  let changed = false;
+  const fallbackType = allowed.includes("precio") ? "precio" : allowed[0];
+
+  for (const it of cotizacionActual.items) {
+    if (!allowed.includes(it.priceType)) {
+      it.priceType = fallbackType;
+      it.customPrice = 0;
+      changed = true;
+    }
+    if (it.priceType !== "precioVendedor" && Number(it.customPrice || 0) !== 0) {
+      it.customPrice = 0;
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    try { normalizeItems(); } catch {}
+  }
+}
+
 // ✅ Buscar producto por código (case-insensitive)
 function getProdByCodigo(codigo){
   const key = String(codigo || "").trim();
@@ -309,13 +362,13 @@ function startApp(){
   operadorHome.classList.add("hidden");
   contenido.classList.add("hidden");
 
-  if (role === "VENDEDOR") {
+  if (isVendedorRole(role)) {
     headerTitle.textContent = "Cotizaciones";
     vendedorHome.classList.remove("hidden");
   } else if (role === "OPERADOR" || role === "BODEGUERO") {
     headerTitle.textContent = (role === "BODEGUERO") ? "Bodeguero" : "Operador";
     operadorHome.classList.remove("hidden");
-  } else if (role === "VISUALIZADOR" || role === "OPERADOR" || role === "BODEGUERO") {
+  } else if (role === "VISUALIZADOR") {
     headerTitle.textContent = "Inventario";
     abrirConsultaInventarioVendedor();
   } else if (role === "ADMIN") {
@@ -328,7 +381,7 @@ function startApp(){
       <div class="card">
         <strong>⚠️ Rol no implementado</strong>
         <div style="color:#6B7280; margin-top:6px;">
-          Actualmente este módulo está listo para <b>VENDEDOR</b>, <b>OPERADOR</b>, <b>BODEGUERO</b>, <b>VISUALIZADOR</b> y <b>ADMIN</b>.
+          Actualmente este módulo está listo para <b>VENDEDOR</b>, <b>VENDEDOR JULIO</b>, <b>VENDEDOR LEONARDI</b>, <b>OPERADOR</b>, <b>BODEGUERO</b>, <b>VISUALIZADOR</b> y <b>ADMIN</b>.
         </div>
       </div>
     `;
@@ -773,7 +826,7 @@ function volverHome(){
   vendedorHome.classList.add("hidden");
   operadorHome.classList.add("hidden");
 
-  if (role === "VENDEDOR") {
+  if (isVendedorRole(role)) {
     headerTitle.textContent = "Cotizaciones";
     vendedorHome.classList.remove("hidden");
     return;
@@ -874,6 +927,8 @@ function volverDesdeCotizacion(){
 }
 
 function renderCotizacion(){
+  // ✅ aplicar restricciones de tipos de precio según rol
+  sanitizeCotizacionPriceTypesForRole();
   const cliente = getClienteSeleccionado();
 
   contenido.innerHTML = `
@@ -971,6 +1026,8 @@ function renderItems(){
   const wrap = el("cotItemsWrap");
   if (!wrap) return;
 
+  const allowedTypes = getAllowedPriceTypes(getRole());
+
   if (!cotizacionActual.items.length) {
     wrap.innerHTML = `<div class="card"><strong>No hay productos agregados.</strong></div>`;
     return;
@@ -981,12 +1038,12 @@ function renderItems(){
     const unit = getUnitPrice(prod, it);
     const sub = Number(it.qty || 0) * unit;
 
-    const options = PRICE_TYPES.map(t => {
+    const options = allowedTypes.map(t => {
       const sel = it.priceType === t ? "selected" : "";
       return `<option value="${t}" ${sel}>${PRICE_LABELS[t]}</option>`;
     }).join("");
 
-    const manualInput = it.priceType === "precioVendedor"
+    const manualInput = (it.priceType === "precioVendedor" && allowedTypes.includes("precioVendedor"))
       ? `<input class="qty" type="number" step="0.01" min="0"
            value="${Number(it.customPrice || 0)}"
            onchange="setItemCustomPrice('${it.id}', this.value)" />`
@@ -999,7 +1056,7 @@ function renderItems(){
             <div class="item-name">${escapeHtml(prod?.producto || it.codigo)}</div>
             <div class="item-meta">
               Código: ${escapeHtml(it.codigo)} • Stock disponible: ${prod ? stockDisponibleTotal(prod) : "?"}<br>
-              Tipo: <b>${PRICE_LABELS[it.priceType]}</b> • P.Unit: <b>${moneyL(unit)}</b>
+              Tipo: <b>${PRICE_LABELS[it.priceType] || it.priceType}</b> • P.Unit: <b>${moneyL(unit)}</b>
             </div>
           </div>
           <div style="font-weight:900">${moneyL(sub)}</div>
@@ -1055,6 +1112,10 @@ function setQty(id, val){
 function setPriceType(id, type){
   const it = findItemById(id);
   if (!it) return;
+  const allowed = getAllowedPriceTypes(getRole());
+  if (!allowed.includes(type)) {
+    type = allowed.includes("precio") ? "precio" : (allowed[0] || "precio");
+  }
   it.priceType = type;
   if (type !== "precioVendedor") {
     it.customPrice = 0;
@@ -1225,10 +1286,12 @@ function abrirModalAgregarProducto(codigo){
 
   selectedProductCode = codigo;
 
+  const allowedTypes = getAllowedPriceTypes(getRole());
+
   el("apTitulo").textContent = prod.producto;
   el("apSub").textContent = `Código: ${prod.codigo} • P:${Number(prod.stockP||0)} A:${Number(prod.stockA||0)} T:${Number(prod.stockT||0)} • Total: ${stockDisponibleTotal(prod)}`;
 
-  const preciosHtml = PRICE_TYPES
+  const preciosHtml = allowedTypes
     .filter(t => t !== "precioVendedor")
     .map(t => {
       const v = prod.precios?.[t];
@@ -1236,13 +1299,13 @@ function abrirModalAgregarProducto(codigo){
       return `<div class="k">${PRICE_LABELS[t]}</div><div class="v">${val}</div>`;
     }).join("");
 
-  el("apListaPrecios").innerHTML = preciosHtml + `
+  el("apListaPrecios").innerHTML = preciosHtml + (allowedTypes.includes("precioVendedor") ? `
     <div class="k">${PRICE_LABELS.precioVendedor}</div><div class="v">Manual</div>
-  `;
+  ` : "");
 
   el("apCantidad").value = 1;
 
-  el("apTipoPrecio").innerHTML = PRICE_TYPES.map(t => {
+  el("apTipoPrecio").innerHTML = allowedTypes.map(t => {
     if (t === "precioVendedor") {
       return `<option value="${t}">${PRICE_LABELS[t]} (manual)</option>`;
     }
@@ -1251,8 +1314,14 @@ function abrirModalAgregarProducto(codigo){
     return `<option value="${t}">${PRICE_LABELS[t]} • ${val}</option>`;
   }).join("");
 
-  el("apTipoPrecio").value = "precio";
-  el("apPrecioManualWrap").classList.add("hidden");
+  const defaultType = allowedTypes.includes("precio") ? "precio" : (allowedTypes[0] || "precio");
+  el("apTipoPrecio").value = defaultType;
+
+  if (defaultType === "precioVendedor" && allowedTypes.includes("precioVendedor")) {
+    el("apPrecioManualWrap").classList.remove("hidden");
+  } else {
+    el("apPrecioManualWrap").classList.add("hidden");
+  }
   el("apPrecioManual").value = "";
 
   openModal("modalAgregarProducto");
@@ -1282,7 +1351,8 @@ const apTipoPrecio = el("apTipoPrecio");
 if (apTipoPrecio) {
   apTipoPrecio.addEventListener("change", () => {
     const type = el("apTipoPrecio").value;
-    if (type === "precioVendedor") {
+    const allowed = getAllowedPriceTypes(getRole());
+    if (type === "precioVendedor" && allowed.includes("precioVendedor")) {
       el("apPrecioManualWrap").classList.remove("hidden");
       setTimeout(() => el("apPrecioManual").focus(), 50);
     } else {
@@ -1298,6 +1368,12 @@ function confirmarAgregarProducto(){
   const qty = Math.max(1, Number(el("apCantidad").value || 1));
   const priceType = el("apTipoPrecio").value;
   let customPrice = 0;
+
+  const allowedTypes = getAllowedPriceTypes(getRole());
+  if (!allowedTypes.includes(priceType)) {
+    alert("Tipo de precio no permitido para este usuario.");
+    return;
+  }
 
   if (priceType === "precioVendedor") {
     customPrice = Number(el("apPrecioManual")?.value || 0);
@@ -4650,7 +4726,7 @@ function renderConsultaInventarioVendedor(){
     if (isAdmin) {
       click = `onclick="abrirModalDetallesProductoDesdeConsulta('${codeEnc}')"`;
       cls = "ticket clickable";
-    } else if (role === "VENDEDOR") {
+    } else if (isVendedorRole(role)) {
       click = `onclick="abrirModalPreciosProductoVendedor('${codeEnc}')"`;
       cls = "ticket clickable";
     }
