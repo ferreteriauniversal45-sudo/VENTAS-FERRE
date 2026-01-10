@@ -652,3 +652,68 @@ main{ padding:12px; }
 /* ===== Modal stacking (operador) ===== */
 #modalAddMovItem{ z-index: 1300; }
 #modalProductosOperador{ z-index: 1400; }
+
+
+/* ===== VENDEDOR: Consulta de inventario (tickets) ===== */
+.ticket{
+  background:#fff;
+  border:1px solid var(--borde);
+  border-radius:14px;
+  padding:12px;
+  margin-bottom:10px;
+  box-shadow:0 4px 10px rgba(0,0,0,.06);
+}
+
+.ticket.clickable{
+  cursor:pointer;
+}
+.ticket.clickable:active{
+  transform:scale(0.99);
+}
+
+/* Modal precios producto (consulta) */
+#modalPreciosProducto{ z-index: 1200; }
+
+.ticket-top{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  align-items:flex-start;
+}
+
+.ticket-title{
+  font-weight:900;
+}
+
+.ticket-sub{
+  color:var(--gris);
+  font-size:12px;
+  margin-top:2px;
+}
+
+.ticket-total{
+  font-weight:900;
+  font-size:12px;
+  white-space:nowrap;
+  color:var(--texto);
+}
+
+.ticket-stocks{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin-top:10px;
+}
+
+.pill{
+  display:inline-block;
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:900;
+  color:#fff;
+}
+
+.pill-p{ background:var(--azul); }
+.pill-a{ background:#6B7280; }
+.pill-t{ background:var(--naranja); }
