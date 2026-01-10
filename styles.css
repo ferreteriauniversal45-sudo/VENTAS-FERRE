@@ -717,3 +717,22 @@ main{ padding:12px; }
 .pill-p{ background:var(--azul); }
 .pill-a{ background:#6B7280; }
 .pill-t{ background:var(--naranja); }
+
+
+/* ===== UI Modals (reemplaza alerts/confirm) ===== */
+.ui-modal-card{
+  text-align:center;
+}
+
+.ui-modal-icon{
+  font-size:42px;
+  line-height:1;
+  margin-bottom:10px;
+}
+
+#uiAlertText, #uiConfirmText{
+  margin-top:0;
+  margin-bottom:14px;
+  white-space:pre-wrap;
+}
+
