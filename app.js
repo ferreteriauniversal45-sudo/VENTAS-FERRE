@@ -58,6 +58,15 @@ function escapeHtml(s){
     .replaceAll("'", "&#039;");
 }
 
+function safeDecodeURIComponent(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch (e) {
+    return value;
+  }
+}
+
+
 function openModal(id){ el(id).classList.add("show"); }
 function closeModal(id){ el(id).classList.remove("show"); }
 
@@ -171,6 +180,70 @@ function nowStr(){
 function getRole(){
   return localStorage.getItem("role") || "";
 }
+
+
+/* ================= MOVIMIENTOS: Usuario (Excel) + Bodega ================= */
+const MOV_USER_KEY = "movimientosUsuario";
+let __movUserResolver = null;
+
+function getMovimientosUsuario(){
+  return String(localStorage.getItem(MOV_USER_KEY) || "").trim();
+}
+
+function pedirMovimientosUsuario(){
+  const existing = getMovimientosUsuario();
+  if (existing) return Promise.resolve(existing);
+
+  // Si no existe el modal (por cualquier razón), fallback a prompt nativo.
+  if (!el("modalMovUsuario") || !el("movUsuarioInput")) {
+    const v = (window.prompt("Nombre de usuario para exportar movimientos (se guarda en este teléfono):", "") || "").trim();
+    if (v) localStorage.setItem(MOV_USER_KEY, v);
+    return Promise.resolve(v);
+  }
+
+  el("movUsuarioInput").value = "";
+  openModal("modalMovUsuario");
+  setTimeout(() => el("movUsuarioInput")?.focus(), 50);
+
+  return new Promise(resolve => {
+    __movUserResolver = resolve;
+  });
+}
+
+function guardarMovimientosUsuario(){
+  const v = String(el("movUsuarioInput")?.value || "").trim();
+  if (!v) {
+    uiAlert("⚠️ Escribe un nombre de usuario.", { title: "Usuario", icon: "⚠️" });
+    return;
+  }
+
+  localStorage.setItem(MOV_USER_KEY, v);
+  closeModal("modalMovUsuario");
+
+  if (__movUserResolver) {
+    const r = __movUserResolver;
+    __movUserResolver = null;
+    r(v);
+  }
+}
+
+function cancelarMovimientosUsuario(){
+  closeModal("modalMovUsuario");
+  if (__movUserResolver) {
+    const r = __movUserResolver;
+    __movUserResolver = null;
+    r("");
+  }
+}
+
+function getBodegaByRole(role){
+  return String(role || "").toUpperCase() === "BODEGUERO" ? "ANEXO" : "PRINCIPAL";
+}
+
+function getBodegaActual(){
+  return getBodegaByRole(getRole());
+}
+
 
 function isBodeguero(){
   return getRole() === "BODEGUERO";
@@ -3172,7 +3245,7 @@ function updateSugerenciasSalida(id){
   }
 
   cont.innerHTML = encontrados.map(p => `
-    <span class="chip" onclick="seleccionarSugerenciaSalida('${id}', '${escapeHtml(p.codigo)}')">
+    <span class="chip" onclick="seleccionarSugerenciaSalida('${id}', '${encodeURIComponent(p.codigo)}')">
       ${escapeHtml(p.codigo)} • ${escapeHtml(p.producto)}
     </span>
   `).join("");
@@ -3180,11 +3253,13 @@ function updateSugerenciasSalida(id){
 
 function seleccionarSugerenciaSalida(filaId, codigo){
   const codigoFmt = String(codigo || "").trim();
-  const it = salidaFactura.items.find(x => x.id === filaId);
+  
+  const codigoDec = safeDecodeURIComponent(codigoFmt);
+const it = salidaFactura.items.find(x => x.id === filaId);
   if (!it) return;
 
-  const prod = getProdByCodigo(codigoFmt);
-  it.codigo = codigoFmt;
+  const prod = getProdByCodigo(codigoDec);
+  it.codigo = codigoDec;
   it.producto = prod ? (prod.producto || "") : "";
 
   const codeInput = el("opSCodigo_" + filaId);
@@ -3559,7 +3634,7 @@ function updateSugerenciasTransferencia(id){
   }
 
   cont.innerHTML = encontrados.map(p => `
-    <span class="chip" onclick="seleccionarSugerenciaTransferencia('${id}', '${escapeHtml(p.codigo)}')">
+    <span class="chip" onclick="seleccionarSugerenciaTransferencia('${id}', '${encodeURIComponent(p.codigo)}')">
       ${escapeHtml(p.codigo)} • ${escapeHtml(p.producto)}
     </span>
   `).join("");
@@ -3567,11 +3642,13 @@ function updateSugerenciasTransferencia(id){
 
 function seleccionarSugerenciaTransferencia(filaId, codigo){
   const codigoFmt = String(codigo || "").trim();
-  const it = transferenciaDoc.items.find(x => x.id === filaId);
+  
+  const codigoDec = safeDecodeURIComponent(codigoFmt);
+const it = transferenciaDoc.items.find(x => x.id === filaId);
   if (!it) return;
 
-  const prod = getProdByCodigo(codigoFmt);
-  it.codigo = codigoFmt;
+  const prod = getProdByCodigo(codigoDec);
+  it.codigo = codigoDec;
   it.producto = prod ? (prod.producto || "") : "";
 
   const codeInput = el("opTCodigo_" + filaId);
@@ -3934,7 +4011,7 @@ function updateSugerenciasConteo(id){
   }
 
   cont.innerHTML = encontrados.map(p => `
-    <span class="chip" onclick="seleccionarSugerenciaConteo('${id}', '${escapeHtml(p.codigo)}')">
+    <span class="chip" onclick="seleccionarSugerenciaConteo('${id}', '${encodeURIComponent(p.codigo)}')">
       ${escapeHtml(p.codigo)} • ${escapeHtml(p.producto)}
     </span>
   `).join("");
@@ -3942,11 +4019,13 @@ function updateSugerenciasConteo(id){
 
 function seleccionarSugerenciaConteo(filaId, codigo){
   const codigoFmt = String(codigo || "").trim();
-  const it = conteoDoc.items.find(x => x.id === filaId);
+  
+  const codigoDec = safeDecodeURIComponent(codigoFmt);
+const it = conteoDoc.items.find(x => x.id === filaId);
   if (!it) return;
 
-  const prod = getProdByCodigo(codigoFmt);
-  it.codigo = codigoFmt;
+  const prod = getProdByCodigo(codigoDec);
+  it.codigo = codigoDec;
   it.producto = prod ? (prod.producto || "") : "";
 
   const codeInput = el("opCCodigo_" + filaId);
@@ -4162,6 +4241,8 @@ function registrarMovimiento(tipo, data){
     id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
     tipo,
     fecha,
+    rol: getRole(),
+    bodega: getBodegaActual(),
     resumen: buildResumenMovimiento(tipo, data),
     data,
     creadoEn: nowStr(),
@@ -4324,7 +4405,8 @@ function renderMovimientosOperador(){
 
 
 
-function exportarMovimientosExcelYVaciar(){
+
+async function exportarMovimientosExcelYVaciar(){
   const movs = JSON.parse(localStorage.getItem("movimientos") || "[]");
   if (!movs.length) {
     alert("No hay movimientos para exportar.");
@@ -4335,72 +4417,319 @@ function exportarMovimientosExcelYVaciar(){
     return;
   }
 
-  const rowsByTipo = {
-    ENTRADA: [],
-    SALIDA: [],
-    TRASLADO: [],
-    CONTEO: []
-  };
+  const usuario = await pedirMovimientosUsuario();
+  if (!usuario) {
+    alert("Debes ingresar un usuario para exportar.");
+    return;
+  }
 
-  const getCreadoCols = (m) => {
-    const iso = m.creadoAtISO || "";
-    if (!iso) return { CreadoEn: m.creadoEn || "", CreadoFecha: "", CreadoHora: "" };
-    const d = new Date(iso);
-    const creadoFecha = d.toISOString().slice(0,10);
-    const creadoHora = d.toISOString().slice(11,19);
-    return { CreadoEn: m.creadoEn || "", CreadoFecha: creadoFecha, CreadoHora: creadoHora };
-  };
-
-  movs.forEach(m => {
-    const tipo = m.tipo || "";
-    const data = m.data || {};
-    const items = Array.isArray(data.items) ? data.items : [];
-    const creado = getCreadoCols(m);
-
-    const base = {
-      MovimientoID: m.id || "",
-      Tipo: tipo,
-      Fecha: data.fecha || m.fecha || "",
-      Factura: data.facturaNo || "",
-      Proveedor: data.proveedor || "",
-      Direccion: data.direccion || "",
-      Referencia: data.referencia || "",
-      ...creado
-    };
-
-    if (items.length) {
-      items.forEach((it, idx) => {
-        rowsByTipo[tipo]?.push({
-          ...base,
-          Linea: idx + 1,
-          Codigo: it.codigo || "",
-          Producto: it.producto || "",
-          Cantidad: Number(it.cantidad || 0)
-        });
-      });
-    } else {
-      rowsByTipo[tipo]?.push({
-        ...base,
-        Linea: "",
-        Codigo: "",
-        Producto: "",
-        Cantidad: ""
-      });
+  // Para CONTEOS necesitamos el stock actual (se intenta cargar el catálogo).
+  const necesitaCatalogo = movs.some(m => String(m?.tipo || "").toUpperCase() === "CONTEO");
+  if (necesitaCatalogo) {
+    try {
+      await ensureCatalogoCargado();
+    } catch (e) {
+      console.warn("No se pudo cargar catálogo para exportar CONTEOS:", e);
     }
-  });
+  }
 
   const wb = XLSX.utils.book_new();
 
-  const addSheet = (name, rows) => {
-    const ws = XLSX.utils.json_to_sheet(rows);
+  const getFechaMov = (m) => {
+    const d = (m && m.data) ? m.data : {};
+    return d.fecha || d.fechaISO || m.fecha || "";
+  };
+
+  const getRealizado = (m) => {
+    if (m?.creadoEn) return m.creadoEn;
+    if (m?.creadoAtISO) {
+      try { return new Date(m.creadoAtISO).toLocaleString("es-HN"); } catch {}
+    }
+    return "";
+  };
+
+  const getUbicacion = (m) => {
+    // Preferir lo guardado en el movimiento; si no existe, inferir por rol.
+    if (m?.bodega) return m.bodega;
+    if (m?.rol) return getBodegaByRole(m.rol);
+    return getBodegaActual();
+  };
+
+  const getItems = (m) => {
+    const items = m?.data?.items;
+    return Array.isArray(items) ? items : [];
+  };
+
+  const addSheetFromAoa = (name, rows) => {
+    const ws = XLSX.utils.aoa_to_sheet(rows);
     XLSX.utils.book_append_sheet(wb, ws, name);
   };
 
-  if (rowsByTipo.ENTRADA.length) addSheet("Entradas", rowsByTipo.ENTRADA);
-  if (rowsByTipo.SALIDA.length) addSheet("Salidas", rowsByTipo.SALIDA);
-  if (rowsByTipo.TRASLADO.length) addSheet("Transferencias", rowsByTipo.TRASLADO);
-  if (rowsByTipo.CONTEO.length) addSheet("Conteos", rowsByTipo.CONTEO);
+  /* ================= HOJA: ENTRADAS ================= */
+  const entradasHeader = [
+    "MovimientoID",
+    "Usuario",
+    "Tipo",
+    "FechaMovimiento",
+    "Proveedor",
+    "Factura",
+    "BODEGA",
+    "CODIGO",
+    "PRODUCTO",
+    "CANTIDAD",
+    "REALIZADO"
+  ];
 
+  const entradasRows = [entradasHeader];
+
+  movs
+    .filter(m => String(m?.tipo || "").toUpperCase() === "ENTRADA")
+    .forEach(m => {
+      const d = m.data || {};
+      const fechaMov = getFechaMov(m);
+      const realizado = getRealizado(m);
+      const bodega = getUbicacion(m);
+      const items = getItems(m);
+
+      if (!items.length) {
+        entradasRows.push([
+          m.id || "",
+          usuario,
+          "ENTRADA",
+          fechaMov,
+          d.proveedor || "",
+          d.facturaNo || "",
+          bodega,
+          "",
+          "",
+          "",
+          realizado
+        ]);
+        return;
+      }
+
+      items.forEach(it => {
+        entradasRows.push([
+          m.id || "",
+          usuario,
+          "ENTRADA",
+          fechaMov,
+          d.proveedor || "",
+          d.facturaNo || "",
+          bodega,
+          it.codigo || "",
+          it.producto || "",
+          Number(it.cantidad || 0),
+          realizado
+        ]);
+      });
+    });
+
+  addSheetFromAoa("Entradas", entradasRows);
+
+  /* ================= HOJA: SALIDAS ================= */
+  const salidasHeader = [
+    "MovimientoID",
+    "Usuario",
+    "Tipo",
+    "FechaMovimiento",
+    "Factura/Referencia",
+    "UBICACION",
+    "CODIGO",
+    "PRODUCTO",
+    "CANTIDAD",
+    "REALIZADO"
+  ];
+
+  const salidasRows = [salidasHeader];
+
+  movs
+    .filter(m => String(m?.tipo || "").toUpperCase() === "SALIDA")
+    .forEach(m => {
+      const d = m.data || {};
+      const fechaMov = getFechaMov(m);
+      const realizado = getRealizado(m);
+      const ubic = getUbicacion(m);
+      const items = getItems(m);
+
+      const facRef = d.facturaNo || d.referencia || "";
+
+      if (!items.length) {
+        salidasRows.push([
+          m.id || "",
+          usuario,
+          "SALIDA",
+          fechaMov,
+          facRef,
+          ubic,
+          "",
+          "",
+          "",
+          realizado
+        ]);
+        return;
+      }
+
+      items.forEach(it => {
+        salidasRows.push([
+          m.id || "",
+          usuario,
+          "SALIDA",
+          fechaMov,
+          facRef,
+          ubic,
+          it.codigo || "",
+          it.producto || "",
+          Number(it.cantidad || 0),
+          realizado
+        ]);
+      });
+    });
+
+  addSheetFromAoa("Salidas", salidasRows);
+
+  /* ================= HOJA: TRANSFERENCIAS ================= */
+  const transferHeader = [
+    "MovimientoID",
+    "Usuario",
+    "Tipo",
+    "FechaMovimiento",
+    "Detalles",
+    "Codigo",
+    "Producto",
+    "Cantidad",
+    "Realizado"
+  ];
+
+  const transferRows = [transferHeader];
+
+  const dirDetalle = (dir) => {
+    const v = String(dir || "").toUpperCase();
+    if (v === "P_A") return "Principal a Anexo";
+    if (v === "A_P") return "Anexo a Principal";
+    return String(dir || "");
+  };
+
+  movs
+    .filter(m => String(m?.tipo || "").toUpperCase() === "TRASLADO")
+    .forEach(m => {
+      const d = m.data || {};
+      const fechaMov = getFechaMov(m);
+      const realizado = getRealizado(m);
+      const detalles = dirDetalle(d.direccion || "");
+
+      const items = getItems(m);
+
+      if (!items.length) {
+        transferRows.push([
+          m.id || "",
+          usuario,
+          "TRASLADO",
+          fechaMov,
+          detalles,
+          "",
+          "",
+          "",
+          realizado
+        ]);
+        return;
+      }
+
+      items.forEach(it => {
+        transferRows.push([
+          m.id || "",
+          usuario,
+          "TRASLADO",
+          fechaMov,
+          detalles,
+          it.codigo || "",
+          it.producto || "",
+          Number(it.cantidad || 0),
+          realizado
+        ]);
+      });
+    });
+
+  addSheetFromAoa("Transferencias", transferRows);
+
+  /* ================= HOJA: CONTEOS ================= */
+  const conteosHeader = [
+    "MovimientoID",
+    "Usuario",
+    "Tipo",
+    "FechaMovimiento",
+    "Referencia",
+    "Ubicacion",
+    "Codigo",
+    "Producto",
+    "Diferencias iniciales",
+    "Conteo",
+    "Realizado"
+  ];
+
+  const conteosRows = [conteosHeader];
+
+  movs
+    .filter(m => String(m?.tipo || "").toUpperCase() === "CONTEO")
+    .forEach(m => {
+      const d = m.data || {};
+      const fechaMov = getFechaMov(m);
+      const realizado = getRealizado(m);
+      const ubic = getUbicacion(m);
+      const items = getItems(m);
+
+      const ref = d.referencia || "";
+
+      if (!items.length) {
+        conteosRows.push([
+          m.id || "",
+          usuario,
+          "CONTEO",
+          fechaMov,
+          ref,
+          ubic,
+          "",
+          "",
+          "",
+          "",
+          realizado
+        ]);
+        return;
+      }
+
+      items.forEach(it => {
+        const codigo = String(it.codigo || "").trim();
+
+        // Diferencias iniciales = stock actual del producto (según ubicación)
+        let stockActual = "";
+        try {
+          const prod = getProdByCodigo(codigo);
+          if (prod) {
+            stockActual = (String(ubic || "").toUpperCase() === "ANEXO")
+              ? Number(prod.stockA || 0)
+              : Number(prod.stockP || 0);
+          }
+        } catch {}
+
+        conteosRows.push([
+          m.id || "",
+          usuario,
+          "CONTEO",
+          fechaMov,
+          ref,
+          ubic,
+          codigo,
+          it.producto || "",
+          stockActual,
+          Number(it.cantidad || 0),
+          realizado
+        ]);
+      });
+    });
+
+  addSheetFromAoa("Conteos", conteosRows);
+
+  // Exportar archivo
   const excelBuffer = XLSX.write(wb, { bookType: "xlsx", type: "array" });
   const blob = new Blob([excelBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 
@@ -4414,7 +4743,7 @@ function exportarMovimientosExcelYVaciar(){
     blob,
     `movimientos-${ymd}-${hh}${mm}${ss}.xlsx`,
     "Movimientos - Ferretería Universal",
-    "Libro Excel con entradas, salidas, transferencias y conteos.",
+    "Libro Excel con entradas, salidas, transferencias y conteos (estructura nueva).",
     blob.type
   );
 
@@ -4425,6 +4754,8 @@ function exportarMovimientosExcelYVaciar(){
   // ✅ Abrir compartir automáticamente (Android / Web)
   compartirArchivo();
 }
+
+
 
 function vaciarMovimientosOperador(){
   movimientos = [];
