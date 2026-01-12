@@ -334,6 +334,21 @@
 </div>
 
 
+
+<!-- ================= MODAL: USUARIO MOVIMIENTOS (Excel) ================= -->
+<div id="modalMovUsuario" class="modal">
+  <div class="modal-card ui-modal-card">
+    <div class="ui-modal-icon">👤</div>
+    <h3>Usuario</h3>
+    <p class="muted">Escribe tu nombre para el Excel de movimientos. Se guarda en este teléfono.</p>
+    <input id="movUsuarioInput" placeholder="Ej: Carlos" />
+    <div class="btn-row">
+      <button type="button" onclick="guardarMovimientosUsuario()">Guardar</button>
+      <button type="button" class="secondary" onclick="cancelarMovimientosUsuario()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
 <!-- jsPDF -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
