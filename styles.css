@@ -451,6 +451,16 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
   }
 }
 
+
+/* ===== OPERADOR: Salidas (Cantidad + Pendiente apilados) ===== */
+.op-qtypend{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+.op-qtypend input{
+  margin:0;
+}
 /* ================= OPERADOR: Entradas ================= */
 .op-grid{
   display:flex;
@@ -476,7 +486,7 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
 
 .op-row{
   display:grid;
-  grid-template-columns: minmax(105px, 135px) 40px 1fr minmax(70px, 86px) 40px;
+  grid-template-columns: minmax(105px, 135px) 40px 1fr minmax(86px, 110px) 40px;
   gap:6px;
   padding:10px;
   align-items:center;
@@ -528,10 +538,10 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
 }
 
 .factura-fija{
-  position:sticky;
-  bottom:0;
-  background:rgba(245,246,248,.98);
-  padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 0px) + var(--safe-bottom));
+  position:static;
+  bottom:auto;
+  background:transparent;
+  padding:0;
   margin-top:12px;
 }
 
@@ -560,8 +570,8 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
 }
 
 .factura-items{
-  max-height:220px;
-  overflow:auto;
+  max-height:none;
+  overflow:visible;
   border-top:1px dashed var(--borde);
   margin-top:8px;
   padding-top:8px;
@@ -586,7 +596,7 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
 
 @media (max-width: 360px){
   .op-row{
-    grid-template-columns: minmax(92px, 120px) 38px 1fr minmax(62px, 78px) 38px;
+    grid-template-columns: minmax(92px, 120px) 38px 1fr minmax(78px, 96px) 38px;
     gap:5px;
   }
   .op-icon-btn{
