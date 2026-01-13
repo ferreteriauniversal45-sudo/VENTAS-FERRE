@@ -1,16 +1,15 @@
 :root{
-  --safe-bottom: 0px; /* extra space for Android navigation bar */
   --azul:#243A8F;
   --naranja:#F28C1C;
   --fondo:#F5F6F8;
   --texto:#1F2937;
   --gris:#6B7280;
   --borde:#E5E7EB;
+  --safe-bottom:0px;
 }
 
 *{ box-sizing:border-box; font-family:system-ui, sans-serif; }
-html, body{ height:100%; }
-body{ margin:0; background:var(--fondo); color:var(--texto); min-height:100vh; min-height:100dvh; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--safe-bottom)); }
+body{ margin:0; background:var(--fondo); color:var(--texto); padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--safe-bottom)); }
 
 .hidden{ display:none; }
 #login.hidden{ display:none !important; } /* evita que el login quede encima */
@@ -168,9 +167,7 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
   display:none;            /* no aparece al inicio */
   align-items:center;
   justify-content:center;
-  padding:16px;
-  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px) + var(--safe-bottom));
-  padding-top: calc(16px + env(safe-area-inset-top, 0px));
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(16px + env(safe-area-inset-bottom, 0px) + var(--safe-bottom));
 }
 
 .modal.show{ display:flex; }
@@ -182,10 +179,7 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
   padding:20px;
   border-radius:18px;
   box-shadow:0 14px 40px rgba(0,0,0,.35);
-  max-height: calc(100dvh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - var(--safe-bottom));
-  overflow:auto;
 }
-
 
 .modal-list{
   max-height:320px;
@@ -307,7 +301,6 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
 .pdf-viewer{
   width:100%;
   height:70vh;
-  height:70dvh;
   border:none;
   border-radius:12px;
   background:#fff;
@@ -315,7 +308,6 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
 
 .inventario-list {
   max-height: 60vh;
-  max-height: 60dvh;
   overflow-y: auto;
 }
 
@@ -539,11 +531,9 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
   position:sticky;
   bottom:0;
   background:rgba(245,246,248,.98);
-  padding:10px 0 0;
-  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px) + var(--safe-bottom));
+  padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 0px) + var(--safe-bottom));
   margin-top:12px;
 }
-
 
 .factura-card{
   background:#fff;
@@ -750,4 +740,47 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
 /* ---------- Tickets dentro de listas en modal ---------- */
 .modal-list .ticket{
   margin-bottom: 8px;
+}
+
+/* ===== OPERADOR: Salidas con Pendientes (qty + pend) ===== */
+.op-row.salida{
+  grid-template-columns: minmax(105px, 135px) 40px 1fr minmax(70px, 86px) minmax(70px, 86px) 40px;
+}
+
+@media (max-width: 360px){
+  .op-row.salida{
+    grid-template-columns: minmax(92px, 120px) 38px 1fr minmax(60px, 74px) minmax(60px, 74px) 38px;
+  }
+}
+
+.op-pend-note{
+  padding: 0 10px 8px;
+}
+
+.op-mini{
+  font-size:12px;
+}
+
+
+/* ===== OPERADOR: Pendientes de salida (agrupado por motorista) ===== */
+details.op-group{
+  background:#fff;
+  border:1px solid var(--borde);
+  border-radius:14px;
+  padding:12px;
+  margin-bottom:10px;
+}
+details.op-group summary{
+  list-style:none;
+  cursor:pointer;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  font-weight:900;
+}
+details.op-group summary::-webkit-details-marker{
+  display:none;
+}
+.op-group-body{
+  margin-top:10px;
 }
