@@ -326,6 +326,10 @@ function getBodegaActual(){
 }
 
 
+function isOperador(){
+  return getRole() === "OPERADOR";
+}
+
 function isBodeguero(){
   return getRole() === "BODEGUERO";
 }
@@ -543,6 +547,14 @@ function startApp(){
   } else if (role === "OPERADOR" || role === "BODEGUERO") {
     headerTitle.textContent = (role === "BODEGUERO") ? "Bodeguero" : "Operador";
     operadorHome.classList.remove("hidden");
+
+    // ✅ En BODEGUERO ocultamos funciones exclusivas de OPERADOR (motoristas / pendientes)
+    const soloOperadorIds = ["btnPendientesSalida","btnMotoristas","btnProdPendientes"];
+    if (role === "BODEGUERO") {
+      soloOperadorIds.forEach(id => { const b = el(id); if (b) b.style.display = "none"; });
+    } else {
+      soloOperadorIds.forEach(id => { const b = el(id); if (b) b.style.display = ""; });
+    }
   } else if (role === "VISUALIZADOR") {
     headerTitle.textContent = "Inventario";
     abrirConsultaInventarioVendedor();
@@ -2464,7 +2476,12 @@ function getMotoristaNombreById(id){
 }
 
 /* ================= OPERADOR: MOTORISTAS ================= */
-function abrirMotoristasOperador(){
+async function abrirMotoristasOperador(){
+  if (isBodeguero()) {
+    await uiAlert("Esta opción es solo para el rol OPERADOR.");
+    return;
+  }
+
   vendedorHome.classList.add("hidden");
   operadorHome.classList.add("hidden");
   contenido.classList.remove("hidden");
@@ -2554,7 +2571,12 @@ async function eliminarMotoristaOperador(id){
 /* ================= OPERADOR: PENDIENTES ================= */
 
 /* ================= OPERADOR: PENDIENTES DE SALIDA (cola de despacho) ================= */
-function abrirPendientesSalidaOperador(){
+async function abrirPendientesSalidaOperador(){
+  if (isBodeguero()) {
+    await uiAlert("Esta opción es solo para el rol OPERADOR.");
+    return;
+  }
+
   vendedorHome.classList.add("hidden");
   operadorHome.classList.add("hidden");
   contenido.classList.remove("hidden");
@@ -2953,7 +2975,12 @@ async function despacharGrupoPendientesSalidaOperador(groupKey){
 }
 
 
-function abrirPendientesOperador(){
+async function abrirPendientesOperador(){
+  if (isBodeguero()) {
+    await uiAlert("Esta opción es solo para el rol OPERADOR.");
+    return;
+  }
+
   vendedorHome.classList.add("hidden");
   operadorHome.classList.add("hidden");
   contenido.classList.remove("hidden");
@@ -4093,7 +4120,7 @@ function renderSalidasOperador(){
     <div class="card">
       <strong>📤 Salidas</strong>
       ${f.dispatchMode ? `<div class="badge" style="margin-top:6px;">⏳ Despacho de pendiente</div>` : ``}
-      <div class="muted">${isEdit ? "Editando factura guardada. Puedes cambiar cantidades o eliminar productos." : "Registra salidas con múltiples productos. Se guardan en “Pendientes de salida” hasta que las despaches."}</div>
+      <div class="muted">${isEdit ? "Editando factura guardada. Puedes cambiar cantidades o eliminar productos." : (isBodeguero() ? "Registra salidas con múltiples productos. Se guardan directamente en Movimientos." : "Registra salidas con múltiples productos. Se guardan en “Pendientes de salida” hasta que las despaches.")}</div>
     </div>
 
     <div class="card-lite">
@@ -4107,7 +4134,7 @@ function renderSalidasOperador(){
           <input id="opSFactura" placeholder="Ej: 000123" value="${escapeHtml(f.facturaNo)}" oninput="onSalidaFacturaChange(this.value)" ${f.dispatchMode ? "disabled" : ""} />
         </div>
 
-        <div class="col">
+        ${isOperador() ? `<div class="col">
           <label class="label">Motorista</label>
           <select id="opSMotorista" onchange="onSalidaMotoristaChange(this.value)">
             <option value="">-- Seleccionar --</option>
@@ -4119,7 +4146,9 @@ function renderSalidasOperador(){
         <div class="col">
           <label class="label">Placa</label>
           <input id="opSPlaca" placeholder="Ej: HAA1234" value="${escapeHtml(f.placa || "")}" oninput="onSalidaPlacaChange(this.value)" />
-        </div>
+        ` : ``}
+
+
       </div>
     </div>
 
@@ -4225,7 +4254,7 @@ function renderFilasSalida(){
               placeholder="Cant."
               oninput="onCantidadSalidaInput('${it.id}', this.value)"
             />
-
+${isOperador() ? `
             <input
               id="opSPend_${it.id}"
               type="number"
@@ -4235,6 +4264,7 @@ function renderFilasSalida(){
               ${isDispatch ? "disabled" : ""}
               oninput="onPendienteSalidaInput('${it.id}', this.value)"
             />
+` : ``}
           </div>
 
 
@@ -4458,6 +4488,74 @@ function actualizarPreviewSalida(){
 }
 
 async function guardarFacturaSalidas(){
+  // ✅ BODEGUERO: Salidas directas a Movimientos (sin motoristas / sin pendientes)
+  if (isBodeguero()) {
+    const f = salidaFactura || {};
+    const facturaNo = String(f.facturaNo || "").trim();
+    if (!facturaNo) {
+      await uiAlert("Ingresa el número de factura o referencia.");
+      return;
+    }
+
+    const itemsShip = (Array.isArray(f.items) ? f.items : [])
+      .filter(x => (String(x.codigo || "").trim()) && Number(x.cantidad || 0) > 0)
+      .map(x => ({
+        codigo: String(x.codigo || "").trim(),
+        producto: String(x.producto || "").trim(),
+        cantidad: Number(x.cantidad || 0)
+      }));
+
+    if (!itemsShip.length) {
+      await uiAlert("Agrega al menos un producto con cantidad (cantidad > 0).");
+      return;
+    }
+
+    const snap = {
+      id: f.id || Date.now(),
+      fecha: f.fechaISO || new Date().toISOString().slice(0,10),
+      fechaISO: f.fechaISO || new Date().toISOString().slice(0,10),
+      facturaNo,
+      motoristaId: String(f.motoristaId || "").trim(),
+      motoristaNombre: String(f.motoristaNombre || "").trim(),
+      placa: String(f.placa || "").trim().toUpperCase(),
+      modo: "COMPLETA",
+      items: itemsShip,
+      creadoEn: nowStr(),
+      creadoAtISO: new Date().toISOString(),
+      creadoAtEpoch: Date.now()
+    };
+
+    // Editar movimiento existente
+    if (operadorEdit && operadorEdit.tipo === "SALIDA") {
+      actualizarMovimientoExistente(operadorEdit.movId, "SALIDA", snap);
+      operadorEdit = null;
+      clearOperadorDraft("SALIDA");
+      await uiAlert("✅ Salida actualizada.");
+      abrirMovimientosOperador();
+      return;
+    }
+
+    // Registrar movimiento (directo)
+    facturasSalidas.unshift(snap);
+    localStorage.setItem("facturasSalidas", JSON.stringify(facturasSalidas));
+    registrarMovimiento("SALIDA", snap);
+
+    clearOperadorDraft("SALIDA");
+    await uiAlert("✅ Salida guardada. Ya aparece en Movimientos.");
+
+    // Mantenerse en Salidas (no navegar automáticamente)
+    salidaFactura = {
+      id: Date.now(),
+      fechaISO: new Date().toISOString().slice(0,10),
+      facturaNo: "",
+      items: []
+    };
+    operadorEdit = null;
+    renderSalidasOperador();
+    return;
+  }
+
+
   const f = salidaFactura;
 
   const facturaNo = String(f.facturaNo || "").trim();
@@ -4649,8 +4747,21 @@ async function guardarFacturaSalidas(){
   savePendientesSalidaDespachoOp();
 
   clearOperadorDraft("SALIDA");
-  await uiAlert("✅ Factura enviada a Pendientes de salida. Debes DESPACHARLA para que aparezca en Movimientos.");
-  abrirPendientesSalidaOperador();
+  await uiAlert("✅ Factura enviada a Pendientes de salida. Usa “Pendientes de salida” para DESPACHARLA y que aparezca en Movimientos.");
+
+  // Mantenerse en Salidas para capturar la siguiente factura sin cambiar de pantalla
+  salidaFactura = {
+    id: Date.now(),
+    fechaISO: f.fechaISO || new Date().toISOString().slice(0,10),
+    facturaNo: "",
+    motoristaId: f.motoristaId || "",
+    motoristaNombre: String(f.motoristaNombre || "").trim() || (f.motoristaId ? getMotoristaNombreById(f.motoristaId) : ""),
+    placa: String(f.placa || "").trim().toUpperCase(),
+    dispatchMode: false,
+    items: []
+  };
+  operadorEdit = null;
+  renderSalidasOperador();
   return;
 }
 /* ================= OPERADOR: TRANSFERENCIAS ================= */
