@@ -70,6 +70,9 @@
       <button type="button" onclick="abrirInventarioOperador()">📦 Inventario</button>
       <button type="button" onclick="abrirEntradasOperador()">📥 Entradas</button>
       <button type="button" onclick="abrirSalidasOperador()">📤 Salidas</button>
+      <button type="button" onclick="abrirPendientesSalidaOperador()">🚚 Pendientes de salida</button>
+      <button type="button" onclick="abrirMotoristasOperador()">🚚 Motoristas</button>
+      <button type="button" onclick="abrirPendientesOperador()">⏳ Productos pendientes</button>
       <button type="button" onclick="abrirTransferenciasOperador()">🔄 Transferencias</button>
       <button type="button" onclick="abrirConteosOperador()">✅ Conteos</button>
 
@@ -348,6 +351,31 @@
     </div>
   </div>
 </div>
+
+
+<!-- ================= MODAL: DESPACHAR SALIDA (PENDIENTES DE SALIDA) ================= -->
+<div id="modalDespachoSalida" class="modal">
+  <div class="modal-card ui-modal-card">
+    <div class="ui-modal-icon">🚚</div>
+    <h3>Despachar salida</h3>
+    <p class="muted">Selecciona el motorista con el que se va la factura y registra la placa (opcional).</p>
+
+    <label class="label">Motorista</label>
+    <select id="dsMotoristaSel"></select>
+
+    <div style="margin-top:-6px;"></div>
+    <input id="dsMotoristaManual" placeholder="Si no aparece en la lista, escribe el nombre aquí" />
+
+    <label class="label">Placa (opcional)</label>
+    <input id="dsPlaca" placeholder="Ej: HAA1234" />
+
+    <div class="btn-row">
+      <button type="button" class="secondary" onclick="dsCerrar(false)">Cancelar</button>
+      <button type="button" onclick="dsCerrar(true)">Despachar</button>
+    </div>
+  </div>
+</div>
+
 
 <!-- jsPDF -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
