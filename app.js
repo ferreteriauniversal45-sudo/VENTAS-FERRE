@@ -4216,23 +4216,27 @@ function renderFilasSalida(){
             disabled
           />
 
-          <input
-            id="opSQty_${it.id}"
-            type="number"
-            min="0"
-            value="${qtyVal}"
-            oninput="onCantidadSalidaInput('${it.id}', this.value)"
-          />
+          <div class="op-qtypend">
+            <input
+              id="opSQty_${it.id}"
+              type="number"
+              min="0"
+              value="${qtyVal}"
+              placeholder="Cant."
+              oninput="onCantidadSalidaInput('${it.id}', this.value)"
+            />
 
-          <input
-            id="opSPend_${it.id}"
-            type="number"
-            min="0"
-            value="${pendVal}"
-            placeholder="Pend."
-            ${isDispatch ? "disabled" : ""}
-            oninput="onPendienteSalidaInput('${it.id}', this.value)"
-          />
+            <input
+              id="opSPend_${it.id}"
+              type="number"
+              min="0"
+              value="${pendVal}"
+              placeholder="Pend."
+              ${isDispatch ? "disabled" : ""}
+              oninput="onPendienteSalidaInput('${it.id}', this.value)"
+            />
+          </div>
+
 
           <button type="button" class="op-icon-btn op-del" onclick="borrarFilaSalida('${it.id}')" title="Eliminar">✖</button>
         </div>
