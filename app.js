@@ -1,3 +1,40 @@
+/* ================= SAFE AREA (Android nav bar) =================
+   Algunos teléfonos Android (3 botones / gestos) pueden "encimar" la barra
+   de navegación sobre el contenido. Esto calcula el espacio oculto y lo
+   expone como CSS var(--safe-bottom) para que el CSS agregue padding abajo.
+*/
+(function setupSafeAreaInsets(){
+  const root = document.documentElement;
+
+  function updateSafeBottom(){
+    const vv = window.visualViewport;
+    let bottom = 0;
+
+    if (vv){
+      // Área inferior "oculta" (por barra de navegación / overlays)
+      bottom = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+      bottom = Math.round(bottom);
+    }
+
+    root.style.setProperty("--safe-bottom", bottom + "px");
+  }
+
+  updateSafeBottom();
+
+  window.addEventListener("resize", updateSafeBottom, { passive:true });
+  window.addEventListener("orientationchange", updateSafeBottom, { passive:true });
+
+  if (window.visualViewport){
+    window.visualViewport.addEventListener("resize", updateSafeBottom, { passive:true });
+    window.visualViewport.addEventListener("scroll", updateSafeBottom, { passive:true });
+  }
+
+  // Teclado: en algunos Android cambia el viewport al abrir/cerrar
+  window.addEventListener("focusin", () => setTimeout(updateSafeBottom, 50), { passive:true });
+  window.addEventListener("focusout", () => setTimeout(updateSafeBottom, 50), { passive:true });
+})();
+
+
 /* ================= CONFIG ================= */
 const BASE_RAW = "https://raw.githubusercontent.com/ferreteriauniversal45-sudo/ferreteria-inventario-app/main/";
 const URLS = {
