@@ -1,40 +1,3 @@
-/* ================= SAFE AREA (Android nav bar) =================
-   Algunos teléfonos Android (3 botones / gestos) pueden "encimar" la barra
-   de navegación sobre el contenido. Esto calcula el espacio oculto y lo
-   expone como CSS var(--safe-bottom) para que el CSS agregue padding abajo.
-*/
-(function setupSafeAreaInsets(){
-  const root = document.documentElement;
-
-  function updateSafeBottom(){
-    const vv = window.visualViewport;
-    let bottom = 0;
-
-    if (vv){
-      // Área inferior "oculta" (por barra de navegación / overlays)
-      bottom = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
-      bottom = Math.round(bottom);
-    }
-
-    root.style.setProperty("--safe-bottom", bottom + "px");
-  }
-
-  updateSafeBottom();
-
-  window.addEventListener("resize", updateSafeBottom, { passive:true });
-  window.addEventListener("orientationchange", updateSafeBottom, { passive:true });
-
-  if (window.visualViewport){
-    window.visualViewport.addEventListener("resize", updateSafeBottom, { passive:true });
-    window.visualViewport.addEventListener("scroll", updateSafeBottom, { passive:true });
-  }
-
-  // Teclado: en algunos Android cambia el viewport al abrir/cerrar
-  window.addEventListener("focusin", () => setTimeout(updateSafeBottom, 50), { passive:true });
-  window.addEventListener("focusout", () => setTimeout(updateSafeBottom, 50), { passive:true });
-})();
-
-
 /* ================= CONFIG ================= */
 const BASE_RAW = "https://raw.githubusercontent.com/ferreteriauniversal45-sudo/ferreteria-inventario-app/main/";
 const URLS = {
@@ -94,6 +57,14 @@ function escapeHtml(s){
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
+
+function escSq(s){
+  // Escapa para usar dentro de comillas simples en onclick="fn('...')"
+  return String(s ?? "")
+    .replaceAll("\\", "\\\\")
+    .replaceAll("'", "\\'");
+}
+
 
 function safeDecodeURIComponent(value) {
   try {
@@ -194,6 +165,79 @@ function uiConfirmCancel(){
     const r = __uiConfirmResolver;
     __uiConfirmResolver = null;
     r(false);
+  }
+
+
+}
+
+/* ================= MODAL: DESPACHAR SALIDA (pendientes de salida) ================= */
+let __dsResolver = null;
+
+function dsAbrir({ motoristas = [], defaultId = "", defaultNombre = "", defaultPlaca = "" } = {}){
+  const sel = el("dsMotoristaSel");
+  const manual = el("dsMotoristaManual");
+  const placa = el("dsPlaca");
+
+  if (sel) {
+    sel.innerHTML = `<option value="">-- Selecciona --</option>` + motoristas.map(m => (
+      `<option value="${escapeHtml(m.id)}">${escapeHtml(m.nombre)}</option>`
+    )).join("");
+    sel.value = defaultId || "";
+  }
+  if (manual) manual.value = (!defaultId && defaultNombre) ? defaultNombre : "";
+  if (placa) placa.value = defaultPlaca || "";
+
+  openModal("modalDespachoSalida");
+
+  return new Promise(resolve => {
+    __dsResolver = resolve;
+  });
+}
+
+function dsCerrar(ok){
+  const sel = el("dsMotoristaSel");
+  const manual = el("dsMotoristaManual");
+  const placa = el("dsPlaca");
+
+  if (!ok) {
+    closeModal("modalDespachoSalida");
+    if (__dsResolver) {
+      const r = __dsResolver;
+      __dsResolver = null;
+      r(null);
+    }
+    return;
+  }
+
+  const motoristas = getMotoristasOp();
+  const selId = sel ? String(sel.value || "").trim() : "";
+  let nombre = "";
+  let id = "";
+
+  if (selId) {
+    id = selId;
+    const m = motoristas.find(x => String(x.id) === String(selId));
+    nombre = m ? String(m.nombre || "").trim() : "";
+  }
+
+  const manualName = manual ? String(manual.value || "").trim() : "";
+  if (manualName) {
+    nombre = manualName;
+    id = ""; // manual
+  }
+
+  if (!nombre) {
+    uiAlert("Debes indicar el nombre del motorista para despachar.");
+    return;
+  }
+
+  const placaVal = placa ? String(placa.value || "").trim().toUpperCase() : "";
+
+  closeModal("modalDespachoSalida");
+  if (__dsResolver) {
+    const r = __dsResolver;
+    __dsResolver = null;
+    r({ motoristaId: id, motoristaNombre: nombre, placa: placaVal });
   }
 }
 
@@ -415,6 +459,27 @@ const contenido = el("contenido");
 
 const headerTitle = el("headerTitle");
 
+
+
+/* ================= SAFE AREA (Android navigation bar) ================= */
+(function setupSafeAreaBottom(){
+  const set = () => {
+    const vv = window.visualViewport;
+    if (!vv) {
+      document.documentElement.style.setProperty("--safe-bottom", "0px");
+      return;
+    }
+    const bottom = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+    document.documentElement.style.setProperty("--safe-bottom", Math.round(bottom) + "px");
+  };
+
+  set();
+  window.addEventListener("resize", set);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", set);
+    window.visualViewport.addEventListener("scroll", set);
+  }
+})();
 /* ================= INIT ================= */
 async function initApp() {
   await checkVersionAndReload();
@@ -2118,9 +2183,911 @@ let conteoDoc = null;
 let operadorFilaActivaId = null;
 let operadorFilaActivaTipo = "ENTRADA";
 
+/* ================= OPERADOR: BORRADORES (autosave) ================= */
+const OP_DRAFT_PREFIX = "opDraft_";
+const OP_DRAFT_MAX_AGE_DAYS = 30;
+
+function opDraftKey(tipo){ return OP_DRAFT_PREFIX + String(tipo || ""); }
+function opMakeItemId(){
+  return String(Date.now()) + "_" + Math.random().toString(16).slice(2);
+}
+
+function saveOperadorDraft(tipo, data){
+  try {
+    if (!data) return;
+    localStorage.setItem(opDraftKey(tipo), JSON.stringify({ ts: Date.now(), data }));
+  } catch {}
+}
+
+function loadOperadorDraft(tipo){
+  try {
+    const raw = localStorage.getItem(opDraftKey(tipo));
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (!obj || !obj.data) return null;
+
+    const ts = Number(obj.ts || 0);
+    if (ts && (Date.now() - ts) > (OP_DRAFT_MAX_AGE_DAYS * 86400000)) {
+      localStorage.removeItem(opDraftKey(tipo));
+      return null;
+    }
+    return obj;
+  } catch {
+    return null;
+  }
+}
+
+function clearOperadorDraft(tipo){
+  try { localStorage.removeItem(opDraftKey(tipo)); } catch {}
+}
+
+function normalizeOperadorDraft(tipo, doc){
+  const d = (doc && typeof doc === "object") ? doc : {};
+  const out = {
+    ...d,
+    id: d.id || Date.now(),
+    fechaISO: d.fechaISO || new Date().toISOString().slice(0,10),
+    items: Array.isArray(d.items) ? d.items : []
+  };
+
+  if (tipo === "ENTRADA") {
+    out.proveedor = out.proveedor || "";
+    out.facturaNo = out.facturaNo || "";
+  } else if (tipo === "SALIDA") {
+    out.facturaNo = out.facturaNo || "";
+  } else if (tipo === "TRASLADO") {
+    out.direccion = (out.direccion === "A_P" ? "A_P" : "P_A");
+    out.referencia = out.referencia || "";
+  } else if (tipo === "CONTEO") {
+    out.referencia = out.referencia || "";
+  }
+
+  out.items = out.items.map(it => ({
+    ...it,
+    id: (it && it.id) ? it.id : opMakeItemId(),
+    codigo: (it && it.codigo) ? it.codigo : "",
+    producto: (it && it.producto) ? it.producto : "",
+    cantidad: (it && (it.cantidad !== undefined)) ? it.cantidad : ""
+  }));
+
+  return out;
+}
+
+function draftTieneContenido(tipo, d){
+  if (!d || typeof d !== "object") return false;
+
+  if (Array.isArray(d.items) && d.items.some(x =>
+    x && (((x.codigo || "").trim()) || (String(x.cantidad || "").trim()))
+  )) return true;
+
+  if (tipo === "ENTRADA") return !!((d.proveedor || "").trim() || (d.facturaNo || "").trim());
+  if (tipo === "SALIDA") return !!((d.facturaNo || "").trim());
+  if (tipo === "TRASLADO") return !!((d.referencia || "").trim());
+  if (tipo === "CONTEO") return !!((d.referencia || "").trim());
+
+  return false;
+}
+
+async function maybeRestoreOperadorDraft(tipo, onRestore){
+  const pack = loadOperadorDraft(tipo);
+  if (!pack || !pack.data) return false;
+
+  const d = pack.data;
+  if (!draftTieneContenido(tipo, d)) return false;
+
+  const fecha = (d.fechaISO || "").trim() || "—";
+  const ok = await uiConfirm(
+    `Tienes un borrador sin guardar (${tipo}) con fecha ${fecha}.
+
+¿Quieres continuar donde lo dejaste?`,
+    { title: "Continuar borrador", okText: "Continuar", cancelText: "Empezar nuevo" }
+  );
+
+  if (!ok) {
+    clearOperadorDraft(tipo);
+    return false;
+  }
+
+  try { onRestore(normalizeOperadorDraft(tipo, d)); } catch {}
+  return true;
+}
+
+async function borrarBorradorOperador(tipo){
+  const ok = await uiConfirm(
+    "¿Borrar el borrador y empezar de cero?",
+    { title: "Borrar borrador", okText: "Borrar", cancelText: "Cancelar" }
+  );
+  if (!ok) return;
+
+  clearOperadorDraft(tipo);
+  operadorEdit = null;
+
+  if (tipo === "ENTRADA") {
+    entradaFactura = { id: Date.now(), fechaISO: new Date().toISOString().slice(0,10), proveedor: "", facturaNo: "", items: [] };
+    renderEntradasOperador();
+    return;
+  }
+
+  if (tipo === "SALIDA") {
+    salidaFactura = { id: Date.now(), fechaISO: new Date().toISOString().slice(0,10), facturaNo: "", items: [] };
+    renderSalidasOperador();
+    return;
+  }
+
+  if (tipo === "TRASLADO") {
+    transferenciaDoc = { id: Date.now(), fechaISO: new Date().toISOString().slice(0,10), direccion: "P_A", referencia: "", items: [] };
+    agregarFilaTransferencia();
+    renderTransferenciasOperador();
+    return;
+  }
+
+  if (tipo === "CONTEO") {
+    conteoDoc = { id: Date.now(), fechaISO: new Date().toISOString().slice(0,10), referencia: "", items: [] };
+    renderConteosOperador();
+    renderFilasConteo();
+    actualizarPreviewConteo();
+    return;
+  }
+}
+
 let facturasEntradas = JSON.parse(localStorage.getItem("facturasEntradas") || "[]");
 let facturasSalidas = JSON.parse(localStorage.getItem("facturasSalidas") || "[]");
 let transferencias = JSON.parse(localStorage.getItem("transferencias") || "[]");
+/* ================= OPERADOR: MOTORISTAS + PENDIENTES ================= */
+const LS_MOTORISTAS_OP = "op_motoristas";
+const LS_PENDIENTES_SALIDAS = "op_pendientes_salidas";
+const LS_PENDIENTES_SALIDA_DESPACHO = "op_pendientes_salida_despacho";
+
+function lsRead(key, fallback){
+  try{
+    const raw = localStorage.getItem(key);
+    if (raw === null || raw === undefined) return fallback;
+    const val = JSON.parse(raw);
+    return (val === null || val === undefined) ? fallback : val;
+  }catch(e){
+    return fallback;
+  }
+}
+function lsWrite(key, val){
+  localStorage.setItem(key, JSON.stringify(val));
+}
+
+let motoristasOp = lsRead(LS_MOTORISTAS_OP, []);
+if (!Array.isArray(motoristasOp)) motoristasOp = [];
+
+let pendientesSalidasOp = lsRead(LS_PENDIENTES_SALIDAS, []);
+if (!Array.isArray(pendientesSalidasOp)) pendientesSalidasOp = [];
+
+function getMotoristasOp(){
+  motoristasOp = lsRead(LS_MOTORISTAS_OP, []);
+  if (!Array.isArray(motoristasOp)) motoristasOp = [];
+  return motoristasOp;
+}
+function saveMotoristasOp(){
+  lsWrite(LS_MOTORISTAS_OP, motoristasOp);
+}
+
+function getPendientesOp(){
+  pendientesSalidasOp = lsRead(LS_PENDIENTES_SALIDAS, []);
+  if (!Array.isArray(pendientesSalidasOp)) pendientesSalidasOp = [];
+  return pendientesSalidasOp;
+}
+function savePendientesOp(){
+  lsWrite(LS_PENDIENTES_SALIDAS, pendientesSalidasOp);
+}
+
+
+
+/* ===== OPERADOR: PENDIENTES DE SALIDA (cola de despacho) ===== */
+let salidasPendientesDespachoOp = null;
+
+function getPendientesSalidaDespachoOp(){
+  if (!Array.isArray(salidasPendientesDespachoOp)) {
+    salidasPendientesDespachoOp = lsRead(LS_PENDIENTES_SALIDA_DESPACHO, []);
+  }
+  if (!Array.isArray(salidasPendientesDespachoOp)) salidasPendientesDespachoOp = [];
+  return salidasPendientesDespachoOp;
+}
+
+function savePendientesSalidaDespachoOp(){
+  lsWrite(LS_PENDIENTES_SALIDA_DESPACHO, getPendientesSalidaDespachoOp());
+}
+
+function findSalidaPendienteDespachoById(id){
+  const list = getPendientesSalidaDespachoOp();
+  return list.find(x => String(x.id) === String(id));
+}
+
+function upsertSalidaPendienteDespacho(pend){
+  if (!pend) return;
+  const list = getPendientesSalidaDespachoOp();
+  const idx = list.findIndex(x => String(x.id) === String(pend.id));
+  if (idx >= 0) list[idx] = pend;
+  else list.unshift(pend);
+  savePendientesSalidaDespachoOp();
+}
+
+function removeSalidaPendienteDespacho(id){
+  const list = getPendientesSalidaDespachoOp();
+  salidasPendientesDespachoOp = list.filter(x => String(x.id) !== String(id));
+  savePendientesSalidaDespachoOp();
+}
+
+
+function upsertPendienteSalida(facturaNo, itemsPend, meta = {}){
+  const fno = String(facturaNo || "").trim();
+  if (!fno) return;
+
+  getPendientesOp();
+
+  const totalPend = (itemsPend || []).reduce((acc,x)=> acc + Number(x.cantidad || 0), 0);
+
+  if (!totalPend) {
+    // si ya no hay pendientes, eliminar
+    pendientesSalidasOp = pendientesSalidasOp.filter(p => String(p.facturaNo || "").trim() !== fno);
+    savePendientesOp();
+    return;
+  }
+
+  const nowISO = new Date().toISOString();
+  const idx = pendientesSalidasOp.findIndex(p => String(p.facturaNo || "").trim() === fno);
+  const base = idx >= 0 ? pendientesSalidasOp[idx] : {
+    id: "PEND_" + fno + "_" + Date.now(),
+    facturaNo: fno,
+    creadoAtISO: nowISO
+  };
+
+  const nuevo = {
+    ...base,
+    facturaNo: fno,
+    actualizadoAtISO: nowISO,
+    items: itemsPend.map(x => ({
+      codigo: x.codigo,
+      producto: x.producto || "",
+      cantidad: Number(x.cantidad || 0)
+    })),
+    totalUnidades: totalPend,
+    totalLineas: (itemsPend || []).length,
+    ...meta
+  };
+
+  if (idx >= 0) pendientesSalidasOp[idx] = nuevo;
+  else pendientesSalidasOp.unshift(nuevo);
+
+  savePendientesOp();
+}
+
+function getMotoristaNombreById(id){
+  const list = getMotoristasOp();
+  const m = list.find(x => String(x.id) === String(id));
+  return m ? (m.nombre || "") : "";
+}
+
+/* ================= OPERADOR: MOTORISTAS ================= */
+function abrirMotoristasOperador(){
+  vendedorHome.classList.add("hidden");
+  operadorHome.classList.add("hidden");
+  contenido.classList.remove("hidden");
+
+  getMotoristasOp();
+
+  contenido.innerHTML = `
+    <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
+
+    <div class="card">
+      <strong>🚚 Motoristas</strong>
+      <div class="muted">Agrega o elimina motoristas. Se guarda en este teléfono.</div>
+    </div>
+
+    <div class="card-lite">
+      <label class="label">Nombre del motorista</label>
+      <input id="opMotoristaNombre" placeholder="Ej: Juan Pérez" />
+      <button type="button" onclick="agregarMotoristaOperador()">➕ Agregar motorista</button>
+    </div>
+
+    <div class="card-lite">
+      <strong>Lista</strong>
+      <div id="opMotoristasLista" style="margin-top:10px;"></div>
+    </div>
+  `;
+
+  renderMotoristasOperador();
+}
+
+function renderMotoristasOperador(){
+  const wrap = el("opMotoristasLista");
+  if (!wrap) return;
+
+  const list = getMotoristasOp();
+
+  if (!list.length) {
+    wrap.innerHTML = `<div class="muted">No hay motoristas agregados.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = list.map(m => `
+    <div class="list-item" style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+      <div>
+        <div class="list-title">${escapeHtml(m.nombre || "")}</div>
+        <div class="list-sub">ID: ${escapeHtml(String(m.id))}</div>
+      </div>
+      <button type="button" class="small danger" onclick="eliminarMotoristaOperador('${m.id}')">Eliminar</button>
+    </div>
+  `).join("");
+}
+
+async function agregarMotoristaOperador(){
+  const inp = el("opMotoristaNombre");
+  const nombre = String(inp?.value || "").trim();
+  if (!nombre) {
+    await uiAlert("Escribe el nombre del motorista.");
+    return;
+  }
+
+  getMotoristasOp();
+
+  const dup = motoristasOp.some(m => String(m.nombre || "").trim().toLowerCase() === nombre.toLowerCase());
+  if (dup) {
+    await uiAlert("Ese motorista ya existe.");
+    return;
+  }
+
+  motoristasOp.unshift({ id: Date.now(), nombre });
+  saveMotoristasOp();
+
+  if (inp) inp.value = "";
+  renderMotoristasOperador();
+  await uiAlert("✅ Motorista agregado.");
+}
+
+async function eliminarMotoristaOperador(id){
+  const ok = await uiConfirm("¿Eliminar este motorista?", { title: "Eliminar motorista", icon: "🗑️", okText: "Eliminar" });
+  if (!ok) return;
+
+  getMotoristasOp();
+  motoristasOp = motoristasOp.filter(m => String(m.id) !== String(id));
+  saveMotoristasOp();
+
+  renderMotoristasOperador();
+}
+
+/* ================= OPERADOR: PENDIENTES ================= */
+
+/* ================= OPERADOR: PENDIENTES DE SALIDA (cola de despacho) ================= */
+function abrirPendientesSalidaOperador(){
+  vendedorHome.classList.add("hidden");
+  operadorHome.classList.add("hidden");
+  contenido.classList.remove("hidden");
+
+  getPendientesSalidaDespachoOp();
+
+  contenido.innerHTML = `
+    <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
+
+    <div class="card">
+      <strong>🚚 Pendientes de salida</strong>
+      <div class="muted">Todas las facturas de salida se guardan aquí. Solo pasan a Movimientos cuando presionas <b>Despachar</b>.</div>
+    </div>
+
+    <input id="opPSDSearch" placeholder="🔍 Buscar por factura, motorista, placa, código o producto" />
+
+    <div id="opPSDWrap"></div>
+  `;
+
+  el("opPSDSearch")?.addEventListener("input", () => {
+    const w = el("opPSDWrap");
+    if (w) w.innerHTML = renderPendientesSalidaOperador();
+  });
+
+  const w = el("opPSDWrap");
+  if (w) w.innerHTML = renderPendientesSalidaOperador();
+}
+
+function renderPendientesSalidaOperador(){
+  const q = String(el("opPSDSearch")?.value || "").trim().toLowerCase();
+  let list = (getPendientesSalidaDespachoOp() || []).slice();
+
+  if (q) {
+    list = list.filter(p => {
+      const hay = [
+        p.facturaNo,
+        p.motoristaNombre,
+        p.placa,
+        (p.items || []).map(x => x.codigo).join(" "),
+        (p.items || []).map(x => x.producto).join(" ")
+      ].join(" ").toLowerCase();
+      return hay.includes(q);
+    });
+  }
+
+  if (!list.length) {
+    return `<div class="muted">No hay facturas pendientes de despacho.</div>`;
+  }
+
+  // Agrupar por motorista (SIN MOTORISTA aparte)
+  const groups = {};
+  list.forEach(p => {
+    const nombre = String(p.motoristaNombre || "").trim();
+    const key = nombre ? nombre.toUpperCase() : "__SIN__";
+    if (!groups[key]) groups[key] = { display: nombre || "Sin motorista", items: [] };
+    groups[key].items.push(p);
+  });
+
+  const keys = Object.keys(groups).sort((a,b)=>{
+    if (a === "__SIN__") return -1;
+    if (b === "__SIN__") return 1;
+    return a.localeCompare(b);
+  });
+
+  return keys.map(k => {
+    const g = groups[k];
+    const open = (k === "__SIN__") ? "open" : "";
+    return `
+      <details class="op-group" ${open}>
+        <summary>
+          <span>${escapeHtml(g.display)}</span>
+          <span class="badge">${g.items.length}</span>
+        </summary>
+        <div class="op-group-body">
+          <div class="btn-row" style="margin:10px 0;"><button type="button" class="small" onclick="despacharGrupoPendientesSalidaOperador('${escSq(k)}')">🚚 Despachar todo (${g.items.length})</button></div>${g.items.map(p => renderPendienteSalidaCard(p)).join("")}
+        </div>
+      </details>
+    `;
+  }).join("");
+}
+
+function renderPendienteSalidaCard(p){
+  const items = Array.isArray(p.items) ? p.items : [];
+  const totalShip = items.reduce((a,x)=> a + Number(x.cantidad || 0), 0);
+  const totalPend = items.reduce((a,x)=> a + Number(x.pendiente || 0), 0);
+
+  return `
+    <div class="ticket">
+      <div class="ticket-top">
+        <div>
+          <div class="ticket-title">Factura: ${escapeHtml(p.facturaNo || "")}</div>
+          <div class="ticket-sub">
+            Fecha: ${escapeHtml(p.fecha || "")}
+            ${p.placa ? ` • Placa: ${escapeHtml(p.placa)}` : ``}
+          </div>
+          <div class="ticket-sub">Guardada: ${escapeHtml(p.creadoEn || "")}</div>
+        </div>
+        <div class="ticket-total">
+          Enviar: ${Number(totalShip||0)} • Pend.: ${Number(totalPend||0)}
+        </div>
+      </div>
+
+      <div class="ticket-stocks">
+        <span class="pill pill-t">Líneas: ${items.length}</span>
+        ${p.motoristaNombre ? `<span class="pill pill-p">🚚 ${escapeHtml(p.motoristaNombre)}</span>` : `<span class="pill pill-a">Sin motorista</span>`}
+      </div>
+
+      <div class="btn-row" style="margin-top:10px;">
+        <button type="button" class="secondary small" onclick="abrirSalidasOperadorEditarPendiente('${escapeHtml(p.id)}')">✏️ Editar</button>
+        <button type="button" class="danger small" onclick="eliminarSalidaPendienteDespachoUI('${escapeHtml(p.id)}')">🗑️ Eliminar</button>
+        <button type="button" class="small" onclick="despacharSalidaPendienteDespachoUI('${escapeHtml(p.id)}')">🚚 Despachar</button>
+      </div>
+    </div>
+  `;
+}
+
+async function abrirSalidasOperadorEditarPendiente(pendId){
+  vendedorHome.classList.add("hidden");
+  operadorHome.classList.add("hidden");
+  contenido.classList.remove("hidden");
+
+  await ensureCatalogoCargado();
+
+  const p = findSalidaPendienteDespachoById(pendId);
+  if (!p) {
+    await uiAlert("No se encontró la factura pendiente.");
+    abrirPendientesSalidaOperador();
+    return;
+  }
+
+  operadorEdit = { tipo: "SALIDA_PENDIENTE", pendId: p.id };
+
+  salidaFactura = {
+    id: p.id || Date.now(),
+    fechaISO: p.fecha || new Date().toISOString().slice(0,10),
+    facturaNo: p.facturaNo || "",
+    motoristaId: p.motoristaId || "",
+    motoristaNombre: p.motoristaNombre || "",
+    placa: p.placa || "",
+    dispatchMode: false,
+    items: (Array.isArray(p.items) ? p.items : []).map(it => ({
+      id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
+      codigo: it.codigo || "",
+      producto: it.producto || "",
+      cantidad: (it.cantidad === 0 ? 0 : (it.cantidad || "")),
+      pendiente: (it.pendiente === 0 ? 0 : (it.pendiente || ""))
+    }))
+  };
+
+  renderSalidasOperador();
+}
+
+async function eliminarSalidaPendienteDespachoUI(pendId){
+  const p = findSalidaPendienteDespachoById(pendId);
+  if (!p) {
+    await uiAlert("No se encontró la factura pendiente.");
+    return;
+  }
+
+  const ok = await uiConfirm(
+    `¿Eliminar la factura ${String(p.facturaNo || "").trim()} de Pendientes de salida?`,
+    { title: "Eliminar", icon: "🗑️", okText: "Eliminar" }
+  );
+  if (!ok) return;
+
+  removeSalidaPendienteDespacho(pendId);
+
+  const w = el("opPSDWrap");
+  if (w) w.innerHTML = renderPendientesSalidaOperador();
+}
+
+async function despacharSalidaPendienteDespachoUI(pendId){
+  const p = findSalidaPendienteDespachoById(pendId);
+  if (!p) {
+    await uiAlert("No se encontró la factura pendiente.");
+    return;
+  }
+
+  // Validar que haya algo por despachar
+  const items = Array.isArray(p.items) ? p.items : [];
+  const itemsShip = items
+    .filter(x => (x.codigo || "").trim() && Number(x.cantidad || 0) > 0)
+    .map(x => ({
+      codigo: String(x.codigo || "").trim(),
+      producto: x.producto || "",
+      cantidad: Number(x.cantidad || 0)
+    }));
+
+  if (!itemsShip.length) {
+    await uiAlert("Esta factura no tiene cantidades para despachar (cantidad > 0). Usa Editar y coloca cantidades enviadas.");
+    return;
+  }
+
+  // Pedir motorista (SIEMPRE antes de despachar)
+  const motoristas = getMotoristasOp();
+  const r = await dsAbrir({
+    motoristas,
+    defaultId: p.motoristaId || "",
+    defaultNombre: p.motoristaNombre || "",
+    defaultPlaca: p.placa || ""
+  });
+  if (!r) return;
+
+  const itemsPend = items
+    .filter(x => (x.codigo || "").trim() && Number(x.pendiente || 0) > 0)
+    .map(x => ({
+      codigo: String(x.codigo || "").trim(),
+      producto: x.producto || "",
+      cantidad: Number(x.pendiente || 0)
+    }));
+
+  const totalShip = itemsShip.reduce((a,x)=> a + x.cantidad, 0);
+  const totalPend = itemsPend.reduce((a,x)=> a + x.cantidad, 0);
+
+  const now = new Date();
+
+  const snap = {
+    id: p.id || Date.now(),
+    fecha: p.fecha || new Date().toISOString().slice(0,10),
+    facturaNo: String(p.facturaNo || "").trim(),
+    motoristaId: r.motoristaId || "",
+    motoristaNombre: String(r.motoristaNombre || "").trim(),
+    placa: String(r.placa || "").trim().toUpperCase(),
+    modo: totalPend ? "PARCIAL" : "COMPLETA",
+    items: itemsShip,
+    pendienteItems: itemsPend,
+    pendienteTotalUnidades: totalPend,
+    totalLineas: itemsShip.length,
+    totalUnidades: totalShip,
+    despachadoEn: nowStr(),
+    despachadoAtISO: now.toISOString(),
+    despachadoAtEpoch: now.getTime(),
+    preparadoEn: p.creadoEn || "",
+    preparadoAtISO: p.creadoAtISO || "",
+    preparadoAtEpoch: p.creadoAtEpoch || 0
+  };
+
+  // Si queda pendiente de productos, guardarlo en el panel de pendientes de productos
+  upsertPendienteSalida(snap.facturaNo, itemsPend, {
+    ultimoMotorista: snap.motoristaNombre,
+    ultimaPlaca: snap.placa
+  });
+
+  // Registrar movimiento
+  facturasSalidas.unshift(snap);
+  localStorage.setItem("facturasSalidas", JSON.stringify(facturasSalidas));
+  registrarMovimiento("SALIDA", snap);
+
+  // Eliminar de la cola de despacho
+  removeSalidaPendienteDespacho(pendId);
+
+  await uiAlert("✅ Despachado. Ya aparece en Movimientos.");
+  abrirMovimientosOperador();
+}
+
+
+
+async function despacharGrupoPendientesSalidaOperador(groupKey){
+  const key = String(groupKey || "").trim();
+  const listAll = (getPendientesSalidaDespachoOp() || []).slice();
+
+  const groupList = listAll.filter(p => {
+    const nombre = String(p.motoristaNombre || "").trim();
+    const k = nombre ? nombre.toUpperCase() : "__SIN__";
+    return k === key;
+  });
+
+  if (!groupList.length) {
+    await uiAlert("No hay facturas en este grupo para despachar.");
+    return;
+  }
+
+  // Pedir motorista (una sola vez)
+  const motoristas = getMotoristasOp();
+
+  const defaultId = String(groupList.find(x => String(x.motoristaId || "").trim())?.motoristaId || "");
+  const defaultNombre = (key === "__SIN__") ? "" : String(groupList[0].motoristaNombre || "").trim();
+
+  const placasSet = new Set(
+    groupList
+      .map(x => String(x.placa || "").trim().toUpperCase())
+      .filter(Boolean)
+  );
+  const defaultPlaca = (placasSet.size === 1) ? Array.from(placasSet)[0] : "";
+
+  const r = await dsAbrir({
+    motoristas,
+    defaultId,
+    defaultNombre,
+    defaultPlaca
+  });
+  if (!r) return;
+
+  // Separar facturas despachables / no despachables
+  const dispatchables = [];
+  const skipped = [];
+
+  for (const p of groupList) {
+    const items = Array.isArray(p.items) ? p.items : [];
+    const itemsShip = items
+      .filter(x => (x.codigo || "").trim() && Number(x.cantidad || 0) > 0)
+      .map(x => ({
+        codigo: String(x.codigo || "").trim(),
+        producto: x.producto || "",
+        cantidad: Number(x.cantidad || 0)
+      }));
+
+    if (!itemsShip.length) {
+      skipped.push(p);
+      continue;
+    }
+
+    dispatchables.push({ p, itemsShip });
+  }
+
+  if (!dispatchables.length) {
+    await uiAlert("Ninguna factura del grupo tiene cantidades para despachar (cantidad > 0). Usa Editar y coloca cantidades enviadas.");
+    return;
+  }
+
+  if (skipped.length) {
+    const okSkip = await uiConfirm(
+      `Hay ${skipped.length} factura(s) sin cantidades para despachar y serán omitidas.\n\n¿Continuar con las demás?`,
+      { title: "Omitir facturas", icon: "⚠️", okText: "Continuar", cancelText: "Cancelar" }
+    );
+    if (!okSkip) return;
+  }
+
+  const ok = await uiConfirm(
+    `Vas a despachar ${dispatchables.length} factura(s) con el motorista:\n\n${String(r.motoristaNombre || "").trim()}\n\n¿Confirmar?`,
+    { title: "Despachar todo", icon: "🚚", okText: "Despachar", cancelText: "Cancelar" }
+  );
+  if (!ok) return;
+
+  // Despachar en lote
+  for (const { p, itemsShip } of dispatchables) {
+    const items = Array.isArray(p.items) ? p.items : [];
+
+    const itemsPend = items
+      .filter(x => (x.codigo || "").trim() && Number(x.pendiente || 0) > 0)
+      .map(x => ({
+        codigo: String(x.codigo || "").trim(),
+        producto: x.producto || "",
+        cantidad: Number(x.pendiente || 0)
+      }));
+
+    const totalShip = itemsShip.reduce((a,x)=> a + Number(x.cantidad || 0), 0);
+    const totalPend = itemsPend.reduce((a,x)=> a + Number(x.cantidad || 0), 0);
+
+    const now = new Date();
+    const placaUse = String((r.placa || "") || (p.placa || "")).trim().toUpperCase();
+
+    const snap = {
+      id: p.id || Date.now(),
+      fecha: p.fecha || new Date().toISOString().slice(0,10),
+      facturaNo: String(p.facturaNo || "").trim(),
+      motoristaId: r.motoristaId || "",
+      motoristaNombre: String(r.motoristaNombre || "").trim(),
+      placa: placaUse,
+      modo: totalPend ? "PARCIAL" : "COMPLETA",
+      items: itemsShip,
+      pendienteItems: itemsPend,
+      pendienteTotalUnidades: totalPend,
+      totalLineas: itemsShip.length,
+      totalUnidades: totalShip,
+      despachadoEn: nowStr(),
+      despachadoAtISO: now.toISOString(),
+      despachadoAtEpoch: now.getTime(),
+      preparadoEn: p.creadoEn || "",
+      preparadoAtISO: p.creadoAtISO || "",
+      preparadoAtEpoch: p.creadoAtEpoch || 0
+    };
+
+    // Si queda pendiente de productos, guardarlo
+    upsertPendienteSalida(snap.facturaNo, itemsPend, {
+      ultimoMotorista: snap.motoristaNombre,
+      ultimaPlaca: snap.placa
+    });
+
+    // Registrar movimiento
+    facturasSalidas.unshift(snap);
+    registrarMovimiento("SALIDA", snap);
+
+    // Eliminar de la cola de despacho
+    removeSalidaPendienteDespacho(p.id);
+  }
+
+  // Guardar facturasSalidas (una vez)
+  localStorage.setItem("facturasSalidas", JSON.stringify(facturasSalidas));
+
+  // Refrescar lista
+  const w = el("opPSDWrap");
+  if (w) w.innerHTML = renderPendientesSalidaOperador();
+
+  await uiAlert(`✅ Despachadas ${dispatchables.length} factura(s). Ya aparecen en Movimientos.`);
+}
+
+
+function abrirPendientesOperador(){
+  vendedorHome.classList.add("hidden");
+  operadorHome.classList.add("hidden");
+  contenido.classList.remove("hidden");
+
+  getPendientesOp();
+
+  contenido.innerHTML = `
+    <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
+
+    <div class="card">
+      <strong>⏳ Pendientes</strong>
+      <div class="muted">Facturas con productos pendientes. Se mantienen aunque exportes/vacíes movimientos.</div>
+    </div>
+
+    <input id="opPendBuscar" placeholder="🔍 Buscar por factura, código o producto" oninput="renderPendientesOperador()" />
+
+    <div id="opPendLista"></div>
+  `;
+
+  renderPendientesOperador();
+}
+
+function renderPendientesOperador(){
+  const wrap = el("opPendLista");
+  if (!wrap) return;
+
+  const q = String(el("opPendBuscar")?.value || "").toLowerCase().trim();
+
+  const list = getPendientesOp();
+
+  const filtrados = list.filter(p => {
+    if (!q) return true;
+    const hay = [
+      p.facturaNo,
+      ...(Array.isArray(p.items) ? p.items.map(x => x.codigo) : []),
+      ...(Array.isArray(p.items) ? p.items.map(x => x.producto) : [])
+    ].join(" ").toLowerCase();
+    return hay.includes(q);
+  });
+
+  if (!filtrados.length) {
+    wrap.innerHTML = `<div class="card"><strong>No hay pendientes.</strong><div class="muted">Cuando guardes una salida con campo “Pend.”, aparecerá aquí.</div></div>`;
+    return;
+  }
+
+  wrap.innerHTML = filtrados.map(p => {
+    const items = Array.isArray(p.items) ? p.items : [];
+    const itemsHtml = items.slice(0, 6).map(it => `
+      <div style="display:flex; justify-content:space-between; gap:10px; padding:6px 0; border-bottom:1px solid var(--borde);">
+        <div>
+          <div style="font-weight:900">${escapeHtml(it.codigo || "")}</div>
+          <div class="muted" style="margin-top:0">${escapeHtml(it.producto || "")}</div>
+        </div>
+        <div style="font-weight:900; white-space:nowrap">${Number(it.cantidad || 0)}</div>
+      </div>
+    `).join("");
+
+    return `
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start;">
+          <div>
+            <strong>Factura ${escapeHtml(p.facturaNo || "")}</strong>
+            <div class="muted">${escapeHtml((p.creadoAtISO || "").slice(0,10) || "")} • ${Number(p.totalLineas || items.length)} líneas • ⏳ ${Number(p.totalUnidades || 0)} unid.</div>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button type="button" class="small" onclick="iniciarDespachoPendiente('${escSq(p.facturaNo || "")}')">🚚</button>
+            <button type="button" class="small danger" onclick="eliminarPendienteFactura('${escSq(p.facturaNo || "")}')">✖</button>
+          </div>
+        </div>
+
+        <div class="card-lite" style="margin-top:10px;">
+          ${itemsHtml || `<div class="muted">Sin items.</div>`}
+          ${items.length > 6 ? `<div class="muted" style="margin-top:8px;">+ ${items.length - 6} más…</div>` : ``}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function eliminarPendienteFactura(facturaNo){
+  const ok = await uiConfirm("¿Eliminar este pendiente? (No afecta movimientos ya guardados)", { title: "Eliminar pendiente", icon: "🗑️", okText: "Eliminar" });
+  if (!ok) return;
+
+  const fno = String(facturaNo || "").trim();
+  getPendientesOp();
+  pendientesSalidasOp = pendientesSalidasOp.filter(p => String(p.facturaNo || "").trim() !== fno);
+  savePendientesOp();
+
+  renderPendientesOperador();
+}
+
+async function iniciarDespachoPendiente(facturaNo){
+  const fno = String(facturaNo || "").trim();
+  if (!fno) return;
+
+  vendedorHome.classList.add("hidden");
+  operadorHome.classList.add("hidden");
+  contenido.classList.remove("hidden");
+
+  await ensureCatalogoCargado();
+
+  const p = getPendientesOp().find(x => String(x.facturaNo || "").trim() === fno);
+  if (!p) {
+    await uiAlert("No se encontró el pendiente.");
+    abrirPendientesOperador();
+    return;
+  }
+
+  operadorEdit = null;
+
+  const hoy = new Date().toISOString().slice(0,10);
+
+  salidaFactura = {
+    id: Date.now(),
+    fechaISO: hoy,
+    facturaNo: fno,
+    motoristaId: "",
+    motoristaNombre: "",
+    placa: "",
+    dispatchMode: true,
+    items: (Array.isArray(p.items) ? p.items : []).map(it => ({
+      id: "s_" + Date.now() + "_" + Math.random().toString(16).slice(2),
+      codigo: it.codigo,
+      producto: it.producto || (getProdByCodigo(it.codigo)?.producto || ""),
+      cantidad: "",
+      pendiente: Number(it.cantidad || 0),
+      pendBase: Number(it.cantidad || 0)
+    }))
+  };
+
+  renderSalidasOperador();
+}
+
+
 let conteos = JSON.parse(localStorage.getItem("conteos") || "[]");
 
 let movimientos = JSON.parse(localStorage.getItem("movimientos") || "[]");
@@ -2270,6 +3237,11 @@ async function abrirEntradasOperador(){
 
   operadorEdit = null;
 
+  if (await maybeRestoreOperadorDraft("ENTRADA", (d) => { entradaFactura = d; })) {
+    renderEntradasOperador();
+    return;
+  }
+
   entradaFactura = {
     id: Date.now(),
     fechaISO: new Date().toISOString().slice(0,10),
@@ -2389,7 +3361,10 @@ function renderEntradasOperador(){
         </div>
 
         <div style="height:10px"></div>
-        <button type="button" onclick="guardarFacturaEntradas()">${isEdit ? "💾 Guardar cambios" : "💾 Guardar factura"}</button>
+        <div class="btn-row">
+          <button type="button" onclick="guardarFacturaEntradas()">${isEdit ? "💾 Guardar cambios" : "💾 Guardar factura"}</button>
+          <button type="button" class="secondary" onclick="borrarBorradorOperador('ENTRADA')">🧹 Borrar borrador</button>
+        </div>
       </div>
     </div>
   `;
@@ -2970,6 +3945,9 @@ function actualizarPreviewEntrada(){
   const b = el("opTotUnidades");
   if (a) a.textContent = String(totLineas);
   if (b) b.textContent = String(totUnidades);
+
+
+  saveOperadorDraft("ENTRADA", entradaFactura);
 }
 
 /* ===== Guardar ===== */
@@ -3013,6 +3991,7 @@ function guardarFacturaEntradas(){
   if (operadorEdit && operadorEdit.tipo === "ENTRADA") {
     actualizarMovimientoExistente(operadorEdit.movId, "ENTRADA", snap);
     alert("✅ Cambios guardados.");
+    clearOperadorDraft("ENTRADA");
     operadorEdit = null;
     abrirMovimientosOperador();
     return;
@@ -3023,6 +4002,8 @@ function guardarFacturaEntradas(){
   localStorage.setItem("facturasEntradas", JSON.stringify(facturasEntradas));
 
   registrarMovimiento("ENTRADA", snap);
+
+  clearOperadorDraft("ENTRADA");
 
   alert("✅ Factura guardada localmente.");
   abrirEntradasOperador();
@@ -3041,10 +4022,19 @@ async function abrirSalidasOperador(){
 
   operadorEdit = null;
 
+  if (await maybeRestoreOperadorDraft("SALIDA", (d) => { salidaFactura = d; })) {
+    renderSalidasOperador();
+    return;
+  }
+
   salidaFactura = {
     id: Date.now(),
     fechaISO: new Date().toISOString().slice(0,10),
     facturaNo: "",
+    motoristaId: "",
+    motoristaNombre: "",
+    placa: "",
+    dispatchMode: false,
     items: []
   };
 
@@ -3095,14 +4085,15 @@ async function abrirSalidasOperadorEditar(movId){
 
 function renderSalidasOperador(){
   const f = salidaFactura;
-  const isEdit = operadorEdit && operadorEdit.tipo === "SALIDA";
+  const isEdit = operadorEdit && (operadorEdit.tipo === "SALIDA" || operadorEdit.tipo === "SALIDA_PENDIENTE");
 
   contenido.innerHTML = `
     <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
 
     <div class="card">
       <strong>📤 Salidas</strong>
-      <div class="muted">${isEdit ? "Editando factura guardada. Puedes cambiar cantidades o eliminar productos." : "Registra salidas con múltiples productos."}</div>
+      ${f.dispatchMode ? `<div class="badge" style="margin-top:6px;">⏳ Despacho de pendiente</div>` : ``}
+      <div class="muted">${isEdit ? "Editando factura guardada. Puedes cambiar cantidades o eliminar productos." : "Registra salidas con múltiples productos. Se guardan en “Pendientes de salida” hasta que las despaches."}</div>
     </div>
 
     <div class="card-lite">
@@ -3113,7 +4104,21 @@ function renderSalidasOperador(){
         </div>
         <div class="col">
           <label class="label">Factura / Referencia</label>
-          <input id="opSFactura" placeholder="Ej: 000123" value="${escapeHtml(f.facturaNo)}" oninput="onSalidaFacturaChange(this.value)" />
+          <input id="opSFactura" placeholder="Ej: 000123" value="${escapeHtml(f.facturaNo)}" oninput="onSalidaFacturaChange(this.value)" ${f.dispatchMode ? "disabled" : ""} />
+        </div>
+
+        <div class="col">
+          <label class="label">Motorista</label>
+          <select id="opSMotorista" onchange="onSalidaMotoristaChange(this.value)">
+            <option value="">-- Seleccionar --</option>
+            ${getMotoristasOp().map(m => `<option value="${m.id}" ${String(f.motoristaId||"")===String(m.id) ? "selected" : ""}>${escapeHtml(m.nombre || "")}</option>`).join("")}
+          </select>
+          ${getMotoristasOp().length ? "" : `<div class="muted">No hay motoristas. Ve a “Motoristas” y agrega uno.</div>`}
+        </div>
+
+        <div class="col">
+          <label class="label">Placa</label>
+          <input id="opSPlaca" placeholder="Ej: HAA1234" value="${escapeHtml(f.placa || "")}" oninput="onSalidaPlacaChange(this.value)" />
         </div>
       </div>
     </div>
@@ -3121,7 +4126,7 @@ function renderSalidasOperador(){
     <div class="card-lite">
       <div style="display:flex; gap:10px; align-items:center; justify-content:space-between;">
         <strong>Productos</strong>
-        <button type="button" class="secondary small" onclick="abrirModalAddMovItem('SALIDA')">➕ Agregar</button>
+        <button type="button" class="secondary small" onclick="abrirModalAddMovItem('SALIDA')" ${f.dispatchMode ? "disabled" : ""}>➕ Agregar</button>
       </div>
 
       <div class="op-table" style="margin-top:10px;">
@@ -3132,7 +4137,10 @@ function renderSalidasOperador(){
     <div class="factura-fija">
       <div class="factura-card" id="opFacturaPreviewSalida"></div>
       <div class="btn-row" style="margin-top:10px;">
-        <button type="button" onclick="guardarFacturaSalidas()">${isEdit ? "💾 Guardar cambios" : "💾 Guardar factura"}</button>
+        <div class="btn-row">
+          <button type="button" onclick="guardarFacturaSalidas()">${isEdit ? "💾 Guardar cambios" : "💾 Guardar factura"}</button>
+          <button type="button" class="secondary" onclick="borrarBorradorOperador('SALIDA')">🧹 Borrar borrador</button>
+        </div>
         <button type="button" class="secondary" onclick="abrirMovimientosOperador()">📚 Ir a movimientos</button>
       </div>
     </div>
@@ -3154,6 +4162,20 @@ function onSalidaFacturaChange(v){
   actualizarPreviewSalida();
 }
 
+function onSalidaMotoristaChange(id){
+  if (!salidaFactura) return;
+  salidaFactura.motoristaId = id || "";
+  salidaFactura.motoristaNombre = getMotoristaNombreById(id) || "";
+  actualizarPreviewSalida();
+}
+
+function onSalidaPlacaChange(v){
+  if (!salidaFactura) return;
+  salidaFactura.placa = String(v || "").toUpperCase();
+  actualizarPreviewSalida();
+}
+
+
 function renderFilasSalida(){
   const wrap = el("opItemsWrapSalida");
   if (!wrap) return;
@@ -3168,17 +4190,24 @@ function renderFilasSalida(){
       ? ""
       : Number(it.cantidad || 0);
 
+    const pendVal = (it.pendiente === "" || it.pendiente === null || it.pendiente === undefined)
+      ? ""
+      : Number(it.pendiente || 0);
+
+    const pendBase = Number(it.pendBase || 0);
+    const isDispatch = !!(salidaFactura && salidaFactura.dispatchMode);
+
     return `
       <div class="op-row-wrap">
-        <div class="op-row">
+        <div class="op-row salida">
           <input
             id="opSCodigo_${it.id}"
             placeholder="Código"
             value="${escapeHtml(it.codigo)}"
-            oninput="onCodigoSalidaInput('${it.id}', this.value)"
+            oninput="onCodigoSalidaInput('${it.id}', this.value)" ${isDispatch ? "disabled" : ""}
           />
 
-          <button type="button" class="op-icon-btn secondary" onclick="abrirModalProductosOperador('${it.id}', 'SALIDA')" title="Buscar">🔎</button>
+          <button type="button" class="op-icon-btn secondary" onclick="abrirModalProductosOperador('${it.id}', 'SALIDA')" title="Buscar" ${isDispatch ? "disabled" : ""}>🔎</button>
 
           <input
             id="opSProd_${it.id}"
@@ -3190,13 +4219,25 @@ function renderFilasSalida(){
           <input
             id="opSQty_${it.id}"
             type="number"
-            min="1"
+            min="0"
             value="${qtyVal}"
             oninput="onCantidadSalidaInput('${it.id}', this.value)"
           />
 
+          <input
+            id="opSPend_${it.id}"
+            type="number"
+            min="0"
+            value="${pendVal}"
+            placeholder="Pend."
+            ${isDispatch ? "disabled" : ""}
+            oninput="onPendienteSalidaInput('${it.id}', this.value)"
+          />
+
           <button type="button" class="op-icon-btn op-del" onclick="borrarFilaSalida('${it.id}')" title="Eliminar">✖</button>
         </div>
+
+        ${isDispatch ? `<div class="op-pend-note muted">Pendiente actual: <strong>${pendBase}</strong> • Quedará: <strong>${Number(pendVal || 0)}</strong></div>` : ``}
 
         <div id="opSSug_${it.id}" class="op-sugs"></div>
       </div>
@@ -3251,13 +4292,54 @@ function onCantidadSalidaInput(id, value){
 
   if (String(value || "").trim() === "") {
     it.cantidad = "";
+    if (salidaFactura && salidaFactura.dispatchMode) {
+      // si está en blanco, no se envía nada -> queda todo pendiente
+      it.pendiente = Number(it.pendBase || it.pendiente || 0);
+      const pi = el("opSPend_" + id);
+      if (pi) pi.value = String(it.pendiente);
+    }
     actualizarPreviewSalida();
     return;
   }
 
-  it.cantidad = Math.max(1, Number(value || 1));
+  let n = Math.max(0, Number(value || 0));
+
+  if (salidaFactura && salidaFactura.dispatchMode) {
+    const base = Number(it.pendBase || 0);
+    if (n > base) {
+      n = base;
+      uiAlert("La cantidad enviada no puede ser mayor al pendiente actual.");
+      const qi = el("opSQty_" + id);
+      if (qi) qi.value = String(n);
+    }
+    it.cantidad = n;
+    it.pendiente = Math.max(0, base - n);
+
+    const pi = el("opSPend_" + id);
+    if (pi) pi.value = String(it.pendiente);
+  } else {
+    it.cantidad = n;
+  }
+
   actualizarPreviewSalida();
 }
+
+function onPendienteSalidaInput(id, value){
+  const it = salidaFactura.items.find(x => x.id === id);
+  if (!it) return;
+
+  if (salidaFactura && salidaFactura.dispatchMode) return; // se calcula automáticamente en modo pendiente
+
+  if (String(value || "").trim() === "") {
+    it.pendiente = "";
+    actualizarPreviewSalida();
+    return;
+  }
+
+  it.pendiente = Math.max(0, Number(value || 0));
+  actualizarPreviewSalida();
+}
+
 
 function updateSugerenciasSalida(id){
   const it = salidaFactura.items.find(x => x.id === id);
@@ -3312,56 +4394,11 @@ const it = salidaFactura.items.find(x => x.id === filaId);
 
 function actualizarPreviewSalida(){
   const box = el("opFacturaPreviewSalida");
-  if (!box || !salidaFactura) return;
+  if (!box) return;
 
   const f = salidaFactura;
-  const itemsOk = f.items
-    .filter(x => (x.codigo || "").trim() && Number(x.cantidad || 0) > 0)
-    .map(x => ({
-      codigo: x.codigo,
-      producto: x.producto || (getProdByCodigo(x.codigo)?.producto || ""),
-      cantidad: Number(x.cantidad || 0)
-    }));
 
-  box.innerHTML = `
-    <div class="factura-head">
-      <div>
-        <div class="t">Factura de Salida</div>
-        <div class="factura-meta">Fecha: ${escapeHtml(f.fechaISO || "")}</div>
-      </div>
-      <div style="text-align:right">
-        <div class="t">#${escapeHtml(String(f.facturaNo || ""))}</div>
-        <div class="factura-meta">${itemsOk.length} líneas</div>
-      </div>
-    </div>
-
-    <div class="factura-items">
-      ${
-        itemsOk.length
-          ? itemsOk.map(it => `
-            <div class="factura-line">
-              <div><b>${it.cantidad}</b> x</div>
-              <div>
-                <div style="font-weight:900">${escapeHtml(it.codigo)}</div>
-                <div class="factura-meta">${escapeHtml(it.producto)}</div>
-              </div>
-            </div>
-          `).join("")
-          : `<div class="factura-meta">Agrega productos para ver el resumen.</div>`
-      }
-    </div>
-
-    <div class="factura-tot">
-      <span>Total unidades</span>
-      <span>${itemsOk.reduce((acc, x) => acc + x.cantidad, 0)}</span>
-    </div>
-  `;
-}
-
-function guardarFacturaSalidas(){
-  const f = salidaFactura;
-
-  const itemsOk = f.items
+  const itemsShip = f.items
     .filter(x => (x.codigo || "").trim() && Number(x.cantidad || 0) > 0)
     .map(x => ({
       codigo: x.codigo,
@@ -3369,46 +4406,249 @@ function guardarFacturaSalidas(){
       cantidad: Number(x.cantidad || 0)
     }));
 
-  if (!String(f.facturaNo || "").trim()) {
-    alert("Ingresa el número de factura o referencia.");
+  const itemsPend = f.items
+    .filter(x => (x.codigo || "").trim() && Number(x.pendiente || 0) > 0)
+    .map(x => ({
+      codigo: x.codigo,
+      producto: x.producto || "",
+      cantidad: Number(x.pendiente || 0)
+    }));
+
+  const totalShip = itemsShip.reduce((acc, x) => acc + x.cantidad, 0);
+  const totalPend = itemsPend.reduce((acc, x) => acc + x.cantidad, 0);
+
+  const mot = String(f.motoristaNombre || "").trim() || (f.motoristaId ? getMotoristaNombreById(f.motoristaId) : "");
+  const placa = String(f.placa || "").trim();
+
+  box.innerHTML = `
+    <div class="factura-head">
+      <div>
+        <div class="t">Factura: ${escapeHtml(String(f.facturaNo || "").trim() || "—")}</div>
+        <div class="factura-meta">Fecha: ${escapeHtml(f.fechaISO || "")}</div>
+        ${mot || placa ? `<div class="factura-meta">🚚 ${escapeHtml(mot || "Sin motorista")}${placa ? " • " + escapeHtml(placa) : ""}</div>` : ``}
+        ${f.dispatchMode ? `<div class="factura-meta">⏳ Despacho de pendiente</div>` : ``}
+      </div>
+      <div style="text-align:right;">
+        <div class="t">${totalShip} unid.</div>
+        ${totalPend ? `<div class="factura-meta">⏳ Pend: ${totalPend}</div>` : `<div class="factura-meta">Sin pendientes</div>`}
+      </div>
+    </div>
+
+    <div class="factura-items">
+      ${itemsShip.length ? itemsShip.map(it => `
+        <div class="factura-line">
+          <div style="font-weight:900">${Number(it.cantidad || 0)}</div>
+          <div>
+            <div style="font-weight:900">${escapeHtml(it.codigo || "")}</div>
+            <div class="factura-meta">${escapeHtml(it.producto || "")}</div>
+          </div>
+        </div>
+      `).join("") : `<div class="muted">No hay productos enviados.</div>`}
+    </div>
+
+    <div class="factura-tot">
+      <div>Total enviados</div>
+      <div>${totalShip}</div>
+    </div>
+  `;
+}
+
+async function guardarFacturaSalidas(){
+  const f = salidaFactura;
+
+  const facturaNo = String(f.facturaNo || "").trim();
+  if (!facturaNo) {
+    await uiAlert("Ingresa el número de factura o referencia.");
     return;
   }
-  if (!itemsOk.length) {
-    alert("Agrega al menos un producto (código y cantidad).");
+
+  const itemsShip = f.items
+    .filter(x => (x.codigo || "").trim() && Number(x.cantidad || 0) > 0)
+    .map(x => ({
+      codigo: x.codigo,
+      producto: x.producto || "",
+      cantidad: Number(x.cantidad || 0)
+    }));
+
+  const itemsPend = f.items
+    .filter(x => (x.codigo || "").trim() && Number(x.pendiente || 0) > 0)
+    .map(x => ({
+      codigo: x.codigo,
+      producto: x.producto || "",
+      cantidad: Number(x.pendiente || 0)
+    }));
+
+  if (!itemsShip.length && !itemsPend.length) {
+    await uiAlert("Agrega al menos un producto (código) y coloca cantidad enviada o pendiente.");
     return;
   }
+
+  // En modo despacho pendiente, no permitimos “solo pendientes” sin enviar nada (porque no cambia nada)
+  if (f.dispatchMode && !itemsShip.length) {
+    await uiAlert("En un despacho pendiente debes enviar al menos un producto (cantidad > 0).");
+    return;
+  }
+
+  // Validación motorista/placa (opcional, pero recomendado)
+  if (!String(f.motoristaId || "").trim() && !String(f.motoristaNombre || "").trim()) {
+    const ok = await uiConfirm("No seleccionaste motorista. ¿Deseas guardar de todos modos?", { title: "Motorista", icon: "🚚", okText: "Guardar" });
+    if (!ok) return;
+  }
+  if (!String(f.placa || "").trim()) {
+    const ok = await uiConfirm("No ingresaste placa. ¿Deseas guardar de todos modos?", { title: "Placa", icon: "🚛", okText: "Guardar" });
+    if (!ok) return;
+  }
+
+  // Si es una salida normal (no despacho pendiente) y NO estás editando, validar que la factura sea única
+  if (!operadorEdit && !f.dispatchMode) {
+    const existsMov = facturasSalidas.some(x => String(x.facturaNo || "").trim() === facturaNo);
+    const existsPend = getPendientesSalidaDespachoOp().some(x => String(x.facturaNo || "").trim() === facturaNo);
+
+    if (existsMov) {
+      await uiAlert("Ya existe una SALIDA despachada con esta factura/referencia. Revisa Movimientos.");
+      return;
+    }
+    if (existsPend) {
+      await uiAlert("Ya existe esta factura en Pendientes de salida. Edita la existente.");
+      return;
+    }
+  }
+
+  const totalShip = itemsShip.reduce((acc, x) => acc + x.cantidad, 0);
+  const totalPend = itemsPend.reduce((acc, x) => acc + x.cantidad, 0);
 
   const snap = {
     id: f.id,
     fecha: f.fechaISO,
-    facturaNo: f.facturaNo,
-    items: itemsOk,
-    totalLineas: itemsOk.length,
-    totalUnidades: itemsOk.reduce((acc, x) => acc + x.cantidad, 0),
+    facturaNo,
+    motoristaId: f.motoristaId || "",
+    motoristaNombre: String(f.motoristaNombre || "").trim() || (f.motoristaId ? getMotoristaNombreById(f.motoristaId) : ""),
+    placa: String(f.placa || "").trim().toUpperCase(),
+    modo: f.dispatchMode ? "DESPACHO_PENDIENTE" : (totalPend ? "PARCIAL" : "COMPLETA"),
+    items: itemsShip,
+    pendienteItems: itemsPend,
+    pendienteTotalUnidades: totalPend,
+    totalLineas: itemsShip.length,
+    totalUnidades: totalShip,
     creadoEn: nowStr(),
     creadoAtISO: new Date().toISOString(),
     creadoAtEpoch: Date.now()
   };
 
-  // ✅ EDITAR
+  // ✅ EDITAR MOVIMIENTO (ya despachado)
   if (operadorEdit && operadorEdit.tipo === "SALIDA") {
     actualizarMovimientoExistente(operadorEdit.movId, "SALIDA", snap);
-    alert("✅ Cambios guardados.");
+    await uiAlert("✅ Cambios guardados.");
+    clearOperadorDraft("SALIDA");
     operadorEdit = null;
     abrirMovimientosOperador();
     return;
   }
 
-  // ✅ NUEVO
-  facturasSalidas.unshift(snap);
-  localStorage.setItem("facturasSalidas", JSON.stringify(facturasSalidas));
+  // Items completos (para la cola de despacho)
+  const itemsFull = f.items
+    .filter(x => (x.codigo || "").trim() && (Number(x.cantidad || 0) > 0 || Number(x.pendiente || 0) > 0))
+    .map(x => ({
+      codigo: String(x.codigo || "").trim(),
+      producto: x.producto || "",
+      cantidad: Number(x.cantidad || 0) || 0,
+      pendiente: Number(x.pendiente || 0) || 0
+    }));
 
-  registrarMovimiento("SALIDA", snap);
+  if (!itemsFull.length && !f.dispatchMode) {
+    await uiAlert("Agrega al menos un producto con cantidad o pendiente.");
+    return;
+  }
 
-  alert("✅ Factura guardada localmente.");
-  abrirSalidasOperador();
+  // ✅ EDITAR FACTURA EN COLA (Pendientes de salida)
+  if (operadorEdit && operadorEdit.tipo === "SALIDA_PENDIENTE") {
+    const list = getPendientesSalidaDespachoOp();
+    const idx = list.findIndex(x => String(x.id) === String(operadorEdit.pendId));
+    if (idx >= 0) {
+      const prev = list[idx] || {};
+      list[idx] = {
+        ...prev,
+        id: prev.id || f.id,
+        fecha: f.fechaISO,
+        facturaNo,
+        motoristaId: f.motoristaId || "",
+        motoristaNombre: String(f.motoristaNombre || "").trim() || (f.motoristaId ? getMotoristaNombreById(f.motoristaId) : ""),
+        placa: String(f.placa || "").trim().toUpperCase(),
+        items: itemsFull,
+        actualizadoEn: nowStr(),
+        actualizadoAtISO: new Date().toISOString(),
+        actualizadoAtEpoch: Date.now()
+      };
+      savePendientesSalidaDespachoOp();
+    }
+
+    await uiAlert("✅ Factura actualizada en Pendientes de salida.");
+    clearOperadorDraft("SALIDA");
+    operadorEdit = null;
+    abrirPendientesSalidaOperador();
+    return;
+  }
+
+  // ✅ DESPACHO DE PRODUCTOS PENDIENTES (sí registra movimiento)
+  if (f.dispatchMode) {
+    // Guardar/actualizar pendientes de productos
+    upsertPendienteSalida(facturaNo, itemsPend, {
+      ultimoMotorista: snap.motoristaNombre,
+      ultimaPlaca: snap.placa
+    });
+
+    // Registrar movimiento solo si se enviaron unidades
+    if (itemsShip.length) {
+      facturasSalidas.unshift(snap);
+      localStorage.setItem("facturasSalidas", JSON.stringify(facturasSalidas));
+      registrarMovimiento("SALIDA", snap);
+    }
+
+    clearOperadorDraft("SALIDA");
+
+    if (totalPend) {
+      await uiAlert(`✅ Despacho guardado. Queda pendiente: ${totalPend} unidades.`);
+    } else {
+      await uiAlert("✅ Despacho guardado. La factura quedó COMPLETA (sin pendientes).");
+    }
+    abrirPendientesOperador();
+    return;
+  }
+
+  // ✅ NUEVA FACTURA: se envía a "Pendientes de salida" (NO a movimientos hasta despachar)
+  const pendList = getPendientesSalidaDespachoOp();
+  const ya = pendList.some(x => String(x.facturaNo || "").trim() === facturaNo);
+  if (ya) {
+    await uiAlert("Ya existe esta factura en Pendientes de salida. Usa Editar en esa factura.");
+    return;
+  }
+
+  const pend = {
+    id: f.id,
+    fecha: f.fechaISO,
+    facturaNo,
+    motoristaId: f.motoristaId || "",
+    motoristaNombre: String(f.motoristaNombre || "").trim() || (f.motoristaId ? getMotoristaNombreById(f.motoristaId) : ""),
+    placa: String(f.placa || "").trim().toUpperCase(),
+    items: itemsFull,
+    totalLineas: itemsFull.length,
+    totalUnidades: itemsFull.reduce((acc, x) => acc + Number(x.cantidad || 0), 0),
+    creadoEn: nowStr(),
+    creadoAtISO: new Date().toISOString(),
+    creadoAtEpoch: Date.now(),
+    actualizadoEn: nowStr(),
+    actualizadoAtISO: new Date().toISOString(),
+    actualizadoAtEpoch: Date.now()
+  };
+
+  pendList.unshift(pend);
+  savePendientesSalidaDespachoOp();
+
+  clearOperadorDraft("SALIDA");
+  await uiAlert("✅ Factura enviada a Pendientes de salida. Debes DESPACHARLA para que aparezca en Movimientos.");
+  abrirPendientesSalidaOperador();
+  return;
 }
-
 /* ================= OPERADOR: TRANSFERENCIAS ================= */
 async function abrirTransferenciasOperador(){
   vendedorHome.classList.add("hidden");
@@ -3418,6 +4658,12 @@ async function abrirTransferenciasOperador(){
   await ensureCatalogoCargado();
 
   operadorEdit = null;
+
+  if (await maybeRestoreOperadorDraft("TRASLADO", (d) => { transferenciaDoc = d; })) {
+    if (!Array.isArray(transferenciaDoc.items) || !transferenciaDoc.items.length) agregarFilaTransferencia();
+    renderTransferenciasOperador();
+    return;
+  }
 
   transferenciaDoc = {
     id: Date.now(),
@@ -3521,6 +4767,7 @@ function renderTransferenciasOperador(){
       <div class="factura-card" id="opFacturaPreviewTransfer"></div>
       <div class="btn-row" style="margin-top:10px;">
         <button type="button" onclick="guardarTransferencia()">${isEdit ? "💾 Guardar cambios" : "💾 Guardar transferencia"}</button>
+        <button type="button" class="secondary" onclick="borrarBorradorOperador('TRASLADO')">🧹 Borrar borrador</button>
         <button type="button" class="secondary" onclick="abrirMovimientosOperador()">📚 Ir a movimientos</button>
       </div>
     </div>
@@ -3749,6 +4996,9 @@ function actualizarPreviewTransferencia(){
       <span>${itemsOk.reduce((acc, x) => acc + x.cantidad, 0)}</span>
     </div>
   `;
+
+
+  saveOperadorDraft("TRASLADO", transferenciaDoc);
 }
 
 function guardarTransferencia(){
@@ -3784,6 +5034,7 @@ function guardarTransferencia(){
   if (operadorEdit && operadorEdit.tipo === "TRASLADO") {
     actualizarMovimientoExistente(operadorEdit.movId, "TRASLADO", snap);
     alert("✅ Cambios guardados.");
+    clearOperadorDraft("TRASLADO");
     operadorEdit = null;
     abrirMovimientosOperador();
     return;
@@ -3794,6 +5045,8 @@ function guardarTransferencia(){
   localStorage.setItem("transferencias", JSON.stringify(transferencias));
 
   registrarMovimiento("TRASLADO", snap);
+
+  clearOperadorDraft("TRASLADO");
 
   alert("✅ Transferencia guardada localmente.");
   abrirTransferenciasOperador();
@@ -3808,6 +5061,13 @@ async function abrirConteosOperador(){
   await ensureCatalogoCargado();
 
   operadorEdit = null;
+
+  if (await maybeRestoreOperadorDraft("CONTEO", (d) => { conteoDoc = d; })) {
+    renderConteosOperador();
+    renderFilasConteo();
+    actualizarPreviewConteo();
+    return;
+  }
 
   conteoDoc = {
     id: Date.now(),
@@ -3904,6 +5164,7 @@ function renderConteosOperador(){
       <div class="factura-card" id="opFacturaPreviewConteo"></div>
       <div class="btn-row" style="margin-top:10px;">
         <button type="button" onclick="guardarConteo()">${isEdit ? "💾 Guardar cambios" : "💾 Guardar conteo"}</button>
+        <button type="button" class="secondary" onclick="borrarBorradorOperador('CONTEO')">🧹 Borrar borrador</button>
         <button type="button" class="secondary" onclick="abrirMovimientosOperador()">📚 Ir a movimientos</button>
       </div>
     </div>
@@ -4129,6 +5390,9 @@ function actualizarPreviewConteo(){
       <span>${itemsOk.length}</span>
     </div>
   `;
+
+
+  saveOperadorDraft("CONTEO", conteoDoc);
 }
 
 function guardarConteo(){
@@ -4162,6 +5426,7 @@ function guardarConteo(){
   if (operadorEdit && operadorEdit.tipo === "CONTEO") {
     actualizarMovimientoExistente(operadorEdit.movId, "CONTEO", snap);
     alert("✅ Cambios guardados.");
+    clearOperadorDraft("CONTEO");
     operadorEdit = null;
     abrirMovimientosOperador();
     return;
@@ -4172,6 +5437,8 @@ function guardarConteo(){
   localStorage.setItem("conteos", JSON.stringify(conteos));
 
   registrarMovimiento("CONTEO", snap);
+
+  clearOperadorDraft("CONTEO");
 
   alert("✅ Conteo guardado localmente.");
   abrirConteosOperador();
@@ -4208,7 +5475,9 @@ function buildResumenMovimiento(tipo, data){
   }
   if (tipo === "SALIDA") {
     const fac = d.facturaNo ? `Factura ${d.facturaNo}` : "Salida";
-    return `${fac} • ${d.totalLineas || 0} líneas`;
+    const mot = d.motoristaNombre ? ` • 🚚 ${d.motoristaNombre}` : "";
+    const pla = d.placa ? ` • ${d.placa}` : "";
+    return `${fac}${mot}${pla} • ${d.totalLineas || 0} líneas`;
   }
   if (tipo === "TRASLADO") {
     const dir = d.direccion === "A_P" ? "Anexo → Principal" : "Principal → Anexo";
@@ -4372,6 +5641,148 @@ async function eliminarMovimientoOperador(movId){
   abrirMovimientosOperador();
 }
 
+
+
+async function despacharGrupoPendientesSalidaOperador(groupKey){
+  const key = String(groupKey || "").trim();
+  const listAll = (getPendientesSalidaDespachoOp() || []).slice();
+
+  const groupList = listAll.filter(p => {
+    const nombre = String(p.motoristaNombre || "").trim();
+    const k = nombre ? nombre.toUpperCase() : "__SIN__";
+    return k === key;
+  });
+
+  if (!groupList.length) {
+    await uiAlert("No hay facturas en este grupo para despachar.");
+    return;
+  }
+
+  // Pedir motorista (una sola vez)
+  const motoristas = getMotoristasOp();
+
+  const defaultId = String(groupList.find(x => String(x.motoristaId || "").trim())?.motoristaId || "");
+  const defaultNombre = (key === "__SIN__") ? "" : String(groupList[0].motoristaNombre || "").trim();
+
+  const placasSet = new Set(
+    groupList
+      .map(x => String(x.placa || "").trim().toUpperCase())
+      .filter(Boolean)
+  );
+  const defaultPlaca = (placasSet.size === 1) ? Array.from(placasSet)[0] : "";
+
+  const r = await dsAbrir({
+    motoristas,
+    defaultId,
+    defaultNombre,
+    defaultPlaca
+  });
+  if (!r) return;
+
+  // Separar facturas despachables / no despachables
+  const dispatchables = [];
+  const skipped = [];
+
+  for (const p of groupList) {
+    const items = Array.isArray(p.items) ? p.items : [];
+    const itemsShip = items
+      .filter(x => (x.codigo || "").trim() && Number(x.cantidad || 0) > 0)
+      .map(x => ({
+        codigo: String(x.codigo || "").trim(),
+        producto: x.producto || "",
+        cantidad: Number(x.cantidad || 0)
+      }));
+
+    if (!itemsShip.length) {
+      skipped.push(p);
+      continue;
+    }
+
+    dispatchables.push({ p, itemsShip });
+  }
+
+  if (!dispatchables.length) {
+    await uiAlert("Ninguna factura del grupo tiene cantidades para despachar (cantidad > 0). Usa Editar y coloca cantidades enviadas.");
+    return;
+  }
+
+  if (skipped.length) {
+    const okSkip = await uiConfirm(
+      `Hay ${skipped.length} factura(s) sin cantidades para despachar y serán omitidas.\n\n¿Continuar con las demás?`,
+      { title: "Omitir facturas", icon: "⚠️", okText: "Continuar", cancelText: "Cancelar" }
+    );
+    if (!okSkip) return;
+  }
+
+  const ok = await uiConfirm(
+    `Vas a despachar ${dispatchables.length} factura(s) con el motorista:\n\n${String(r.motoristaNombre || "").trim()}\n\n¿Confirmar?`,
+    { title: "Despachar todo", icon: "🚚", okText: "Despachar", cancelText: "Cancelar" }
+  );
+  if (!ok) return;
+
+  // Despachar en lote
+  for (const { p, itemsShip } of dispatchables) {
+    const items = Array.isArray(p.items) ? p.items : [];
+
+    const itemsPend = items
+      .filter(x => (x.codigo || "").trim() && Number(x.pendiente || 0) > 0)
+      .map(x => ({
+        codigo: String(x.codigo || "").trim(),
+        producto: x.producto || "",
+        cantidad: Number(x.pendiente || 0)
+      }));
+
+    const totalShip = itemsShip.reduce((a,x)=> a + Number(x.cantidad || 0), 0);
+    const totalPend = itemsPend.reduce((a,x)=> a + Number(x.cantidad || 0), 0);
+
+    const now = new Date();
+    const placaUse = String((r.placa || "") || (p.placa || "")).trim().toUpperCase();
+
+    const snap = {
+      id: p.id || Date.now(),
+      fecha: p.fecha || new Date().toISOString().slice(0,10),
+      facturaNo: String(p.facturaNo || "").trim(),
+      motoristaId: r.motoristaId || "",
+      motoristaNombre: String(r.motoristaNombre || "").trim(),
+      placa: placaUse,
+      modo: totalPend ? "PARCIAL" : "COMPLETA",
+      items: itemsShip,
+      pendienteItems: itemsPend,
+      pendienteTotalUnidades: totalPend,
+      totalLineas: itemsShip.length,
+      totalUnidades: totalShip,
+      despachadoEn: nowStr(),
+      despachadoAtISO: now.toISOString(),
+      despachadoAtEpoch: now.getTime(),
+      preparadoEn: p.creadoEn || "",
+      preparadoAtISO: p.creadoAtISO || "",
+      preparadoAtEpoch: p.creadoAtEpoch || 0
+    };
+
+    // Si queda pendiente de productos, guardarlo
+    upsertPendienteSalida(snap.facturaNo, itemsPend, {
+      ultimoMotorista: snap.motoristaNombre,
+      ultimaPlaca: snap.placa
+    });
+
+    // Registrar movimiento
+    facturasSalidas.unshift(snap);
+    registrarMovimiento("SALIDA", snap);
+
+    // Eliminar de la cola de despacho
+    removeSalidaPendienteDespacho(p.id);
+  }
+
+  // Guardar facturasSalidas (una vez)
+  localStorage.setItem("facturasSalidas", JSON.stringify(facturasSalidas));
+
+  // Refrescar lista
+  const w = el("opPSDWrap");
+  if (w) w.innerHTML = renderPendientesSalidaOperador();
+
+  await uiAlert(`✅ Despachadas ${dispatchables.length} factura(s). Ya aparecen en Movimientos.`);
+}
+
 function renderMovimientosOperador(){
   const q = (el("opBuscarMov")?.value || "").toLowerCase().trim();
   const tipoSel = (el("opTipoMov")?.value || "").trim();
@@ -4417,12 +5828,17 @@ function renderMovimientosOperador(){
         `).join("")
       : `<div class="muted">Sin productos.</div>`;
 
-    return `
+    
+    const extraMeta = (String(m.tipo || "").toUpperCase() === "SALIDA" && (d.motoristaNombre || d.placa || d.modo || Number(d.pendienteTotalUnidades || 0) > 0))
+      ? `<div class="muted" style="margin-top:4px;">🚚 ${escapeHtml(d.motoristaNombre || "Sin motorista")}${d.placa ? " • " + escapeHtml(d.placa) : ""}${d.modo ? " • " + escapeHtml(d.modo) : ""}${Number(d.pendienteTotalUnidades || 0) ? " • ⏳ " + Number(d.pendienteTotalUnidades || 0) : ""}</div>`
+      : "";
+return `
       <div class="card">
         <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start;">
           <div>
             <strong>${escapeHtml(movTipoLabel(m.tipo))}</strong>
             <div class="muted">${escapeHtml(m.fecha)} • ${escapeHtml(m.resumen || "")}</div>
+            ${extraMeta}
           </div>
 
           <div style="display:flex; gap:8px; align-items:center;">
@@ -4572,6 +5988,9 @@ async function exportarMovimientosExcelYVaciar(){
     "FechaMovimiento",
     "Factura/Referencia",
     "UBICACION",
+    "Motorista",
+    "Placa",
+    "FechaHoraDespacho",
     "CODIGO",
     "PRODUCTO",
     "CANTIDAD",
@@ -4599,6 +6018,9 @@ async function exportarMovimientosExcelYVaciar(){
           fechaMov,
           facRef,
           ubic,
+          d.motoristaNombre || "",
+          d.placa || "",
+          (d.despachadoEn || realizado),
           "",
           "",
           "",
@@ -4615,6 +6037,9 @@ async function exportarMovimientosExcelYVaciar(){
           fechaMov,
           facRef,
           ubic,
+          d.motoristaNombre || "",
+          d.placa || "",
+          (d.despachadoEn || realizado),
           it.codigo || "",
           it.producto || "",
           Number(it.cantidad || 0),
