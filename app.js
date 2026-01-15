@@ -6,6 +6,8 @@ const URLS = {
   invA: BASE_RAW + "inventarioanexo.json",
   invT: BASE_RAW + "inventariotienda.json",
   preciosadmin: BASE_RAW + "preciosadmin.json",
+  motoristas: BASE_RAW + "motoristas.json",
+  placas: BASE_RAW + "placas.json",
   version: BASE_RAW + "inventario_version.json"
 };
 
@@ -184,18 +186,19 @@ function uiConfirmCancel(){
 /* ================= MODAL: DESPACHAR SALIDA (pendientes de salida) ================= */
 let __dsResolver = null;
 
-function dsAbrir({ motoristas = [], defaultId = "", defaultNombre = "", defaultPlaca = "" } = {}){
-  const sel = el("dsMotoristaSel");
-  const manual = el("dsMotoristaManual");
+function dsAbrir({ motoristas = [], placas = [], defaultId = "", defaultNombre = "", defaultPlaca = "" } = {}){
+  // cachea listas si vienen precargadas
+  if (Array.isArray(motoristas) && motoristas.length) __motoristasRepoCache = motoristas;
+  if (Array.isArray(placas) && placas.length) __placasRepoCache = placas;
+
+  const idEl = el("dsMotoristaId");
+  const nomEl = el("dsMotoristaNombre");
+  const disp = el("dsMotoristaNombreDisplay");
   const placa = el("dsPlaca");
 
-  if (sel) {
-    sel.innerHTML = `<option value="">-- Selecciona --</option>` + motoristas.map(m => (
-      `<option value="${escapeHtml(m.id)}">${escapeHtml(m.nombre)}</option>`
-    )).join("");
-    sel.value = defaultId || "";
-  }
-  if (manual) manual.value = (!defaultId && defaultNombre) ? defaultNombre : "";
+  if (idEl) idEl.value = defaultId || "";
+  if (nomEl) nomEl.value = defaultNombre || "";
+  if (disp) disp.value = defaultNombre || "";
   if (placa) placa.value = defaultPlaca || "";
 
   openModal("modalDespachoSalida");
@@ -206,8 +209,9 @@ function dsAbrir({ motoristas = [], defaultId = "", defaultNombre = "", defaultP
 }
 
 function dsCerrar(ok){
-  const sel = el("dsMotoristaSel");
-  const manual = el("dsMotoristaManual");
+  const idEl = el("dsMotoristaId");
+  const nomEl = el("dsMotoristaNombre");
+  const disp = el("dsMotoristaNombreDisplay");
   const placa = el("dsPlaca");
 
   if (!ok) {
@@ -220,25 +224,10 @@ function dsCerrar(ok){
     return;
   }
 
-  const motoristas = getMotoristasOp();
-  const selId = sel ? String(sel.value || "").trim() : "";
-  let nombre = "";
-  let id = "";
-
-  if (selId) {
-    id = selId;
-    const m = motoristas.find(x => String(x.id) === String(selId));
-    nombre = m ? String(m.nombre || "").trim() : "";
-  }
-
-  const manualName = manual ? String(manual.value || "").trim() : "";
-  if (manualName) {
-    nombre = manualName;
-    id = ""; // manual
-  }
-
+  const id = idEl ? String(idEl.value || "").trim() : "";
+  const nombre = String((nomEl?.value || disp?.value || "")).trim();
   if (!nombre) {
-    uiAlert("Debes indicar el nombre del motorista para despachar.");
+    uiAlert("Debes seleccionar un motorista para despachar.");
     return;
   }
 
@@ -248,8 +237,259 @@ function dsCerrar(ok){
   if (__dsResolver) {
     const r = __dsResolver;
     __dsResolver = null;
-    r({ motoristaId: id, motoristaNombre: nombre, placa: placaVal });
+    r({ motoristaId: id || nombre, motoristaNombre: nombre, placa: placaVal });
   }
+}
+
+
+/* ================= PICKERS: Motoristas / Placas (desde GitHub) ================= */
+let __motoristasRepoCache = null;
+let __placasRepoCache = null;
+
+let __pickMotoristaAll = [];
+let __pickPlacaAll = [];
+let __pickMotoristaResolver = null;
+let __pickPlacaResolver = null;
+
+function __normalizeStringList(data){
+  // Acepta: ["A","B"] o {items:[...]} o {"A":true,...} o texto (líneas)
+  if (Array.isArray(data)) return data;
+  if (typeof data === "string") {
+    return data.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+  }
+  if (data && typeof data === "object") {
+    if (Array.isArray(data.items)) return data.items;
+    if (Array.isArray(data.motoristas)) return data.motoristas;
+    if (Array.isArray(data.placas)) return data.placas;
+    // si es mapa, usamos llaves
+    return Object.keys(data || {});
+  }
+  return [];
+}
+
+function __normalizeMotoristas(data){
+  const arr = __normalizeStringList(data);
+  // si ya vienen objetos {id,nombre}
+  if (arr.length && typeof arr[0] === "object" && arr[0] !== null) {
+    return arr
+      .map(x => ({
+        id: String(x.id ?? x.nombre ?? "").trim(),
+        nombre: String(x.nombre ?? x.id ?? "").trim()
+      }))
+      .filter(x => x.nombre);
+  }
+  return arr
+    .map(x => String(x || "").trim())
+    .filter(Boolean)
+    .map(n => ({ id: n, nombre: n }));
+}
+
+function __normalizePlacas(data){
+  const arr = __normalizeStringList(data);
+  if (arr.length && typeof arr[0] === "object" && arr[0] !== null) {
+    // por si vienen como {placa:"HAA1234"} o {id:"HAA1234"}
+    return arr
+      .map(x => String(x.placa ?? x.id ?? x.value ?? "").trim().toUpperCase())
+      .filter(Boolean);
+  }
+  return arr.map(x => String(x || "").trim().toUpperCase()).filter(Boolean);
+}
+
+async function loadMotoristasRepo(force=false){
+  if (__motoristasRepoCache && !force) return __motoristasRepoCache;
+  try{
+    const data = await fetchJson(URLS.motoristas);
+    __motoristasRepoCache = __normalizeMotoristas(data);
+  }catch(e){
+    console.warn("No se pudo cargar motoristas del repo:", e);
+    // fallback: lo que exista en localStorage (legacy)
+    try{
+      __motoristasRepoCache = (getMotoristasOp() || []).map(m => ({ id: String(m.id ?? m.nombre ?? ""), nombre: String(m.nombre ?? "") })).filter(m => m.nombre);
+    }catch(_){
+      __motoristasRepoCache = [];
+    }
+  }
+  return __motoristasRepoCache;
+}
+
+async function loadPlacasRepo(force=false){
+  if (__placasRepoCache && !force) return __placasRepoCache;
+  try{
+    const data = await fetchJson(URLS.placas);
+    __placasRepoCache = __normalizePlacas(data);
+  }catch(e){
+    console.warn("No se pudo cargar placas del repo:", e);
+    __placasRepoCache = [];
+  }
+  return __placasRepoCache;
+}
+
+function pickMotoristaRender(list){
+  const wrap = el("pickMotoristaList");
+  if (!wrap) return;
+  if (!list.length) {
+    wrap.innerHTML = `<div class="picker-empty">No hay motoristas en <b>motoristas.json</b> o no se pudo cargar.</div>`;
+    return;
+  }
+  wrap.innerHTML = list.map(m => `
+    <button type="button" class="list-item" onclick="pickMotoristaElegir('${escapeHtml(m.id)}','${escapeHtml(m.nombre)}')">
+      <div class="list-title">${escapeHtml(m.nombre)}</div>
+    </button>
+  `).join("");
+}
+
+function pickPlacaRender(list){
+  const wrap = el("pickPlacaList");
+  if (!wrap) return;
+  if (!list.length) {
+    wrap.innerHTML = `<div class="picker-empty">No hay placas en <b>placas.json</b> o no se pudo cargar.</div>`;
+    return;
+  }
+  wrap.innerHTML = list.map(p => `
+    <button type="button" class="list-item" onclick="pickPlacaElegir('${escapeHtml(p)}')">
+      <div class="list-title">${escapeHtml(p)}</div>
+    </button>
+  `).join("");
+}
+
+async function pickMotoristaAbrir(){
+  const list = await loadMotoristasRepo();
+  __pickMotoristaAll = Array.isArray(list) ? list.slice() : [];
+  const inp = el("pickMotoristaSearch");
+  if (inp) inp.value = "";
+  pickMotoristaRender(__pickMotoristaAll);
+  openModal("modalPickMotorista");
+  return new Promise(resolve => {
+    __pickMotoristaResolver = resolve;
+  });
+}
+
+function pickMotoristaFiltrar(){
+  const q = String(el("pickMotoristaSearch")?.value || "").trim().toLowerCase();
+  const list = !q ? __pickMotoristaAll : __pickMotoristaAll.filter(m => String(m.nombre || "").toLowerCase().includes(q));
+  pickMotoristaRender(list);
+}
+
+function pickMotoristaElegir(id, nombre){
+  closeModal("modalPickMotorista");
+  if (__pickMotoristaResolver) {
+    const r = __pickMotoristaResolver;
+    __pickMotoristaResolver = null;
+    r({ id: String(id || "").trim(), nombre: String(nombre || "").trim() });
+  }
+}
+
+function pickMotoristaCerrar(){
+  closeModal("modalPickMotorista");
+  if (__pickMotoristaResolver) {
+    const r = __pickMotoristaResolver;
+    __pickMotoristaResolver = null;
+    r(null);
+  }
+}
+
+async function pickPlacaAbrir(){
+  const list = await loadPlacasRepo();
+  __pickPlacaAll = Array.isArray(list) ? list.slice() : [];
+  const inp = el("pickPlacaSearch");
+  if (inp) inp.value = "";
+  pickPlacaRender(__pickPlacaAll);
+  openModal("modalPickPlaca");
+  return new Promise(resolve => {
+    __pickPlacaResolver = resolve;
+  });
+}
+
+function pickPlacaFiltrar(){
+  const q = String(el("pickPlacaSearch")?.value || "").trim().toUpperCase();
+  const list = !q ? __pickPlacaAll : __pickPlacaAll.filter(p => String(p || "").includes(q));
+  pickPlacaRender(list);
+}
+
+function pickPlacaElegir(placa){
+  closeModal("modalPickPlaca");
+  if (__pickPlacaResolver) {
+    const r = __pickPlacaResolver;
+    __pickPlacaResolver = null;
+    r(String(placa || "").trim().toUpperCase());
+  }
+}
+
+function pickPlacaCerrar(){
+  closeModal("modalPickPlaca");
+  if (__pickPlacaResolver) {
+    const r = __pickPlacaResolver;
+    __pickPlacaResolver = null;
+    r(null);
+  }
+}
+
+/* ===== Hooks para Operador / Despacho ===== */
+async function opSeleccionarMotorista(){
+  if (!salidaFactura) return;
+  if (salidaFactura.dispatchMode) {
+    await uiAlert("No puedes cambiar el motorista en modo despacho.");
+    return;
+  }
+  const m = await pickMotoristaAbrir();
+  if (!m) return;
+
+  salidaFactura.motoristaId = m.id || m.nombre || "";
+  salidaFactura.motoristaNombre = m.nombre || "";
+  if (el("opSMotoristaId")) el("opSMotoristaId").value = salidaFactura.motoristaId;
+  if (el("opSMotoristaNombre")) el("opSMotoristaNombre").value = salidaFactura.motoristaNombre;
+
+  actualizarPreviewSalida();
+
+  // Después de elegir motorista, abrir selección de placa
+  await opSeleccionarPlaca();
+}
+
+async function opSeleccionarPlaca(){
+  if (!salidaFactura) return;
+  if (salidaFactura.dispatchMode) return;
+
+  const placa = await pickPlacaAbrir();
+  if (!placa) return;
+
+  salidaFactura.placa = placa;
+  if (el("opSPlaca")) el("opSPlaca").value = placa;
+  actualizarPreviewSalida();
+}
+
+function opLimpiarMotorista(){
+  if (!salidaFactura) return;
+  if (salidaFactura.dispatchMode) return;
+  salidaFactura.motoristaId = "";
+  salidaFactura.motoristaNombre = "";
+  if (el("opSMotoristaId")) el("opSMotoristaId").value = "";
+  if (el("opSMotoristaNombre")) el("opSMotoristaNombre").value = "";
+  actualizarPreviewSalida();
+}
+
+async function dsSeleccionarMotorista(){
+  const m = await pickMotoristaAbrir();
+  if (!m) return;
+
+  if (el("dsMotoristaId")) el("dsMotoristaId").value = m.id || m.nombre || "";
+  if (el("dsMotoristaNombre")) el("dsMotoristaNombre").value = m.nombre || "";
+  if (el("dsMotoristaNombreDisplay")) el("dsMotoristaNombreDisplay").value = m.nombre || "";
+
+  // Después de elegir motorista, abrir selección de placa
+  await dsSeleccionarPlaca();
+}
+
+async function dsSeleccionarPlaca(){
+  const placa = await pickPlacaAbrir();
+  if (!placa) return;
+  const inp = el("dsPlaca");
+  if (inp) inp.value = placa;
+}
+
+function dsLimpiarMotorista(){
+  if (el("dsMotoristaId")) el("dsMotoristaId").value = "";
+  if (el("dsMotoristaNombre")) el("dsMotoristaNombre").value = "";
+  if (el("dsMotoristaNombreDisplay")) el("dsMotoristaNombreDisplay").value = "";
 }
 
 // Reemplazar alert nativo (evita "https://... dice")
@@ -2782,9 +3022,11 @@ async function despacharSalidaPendienteDespachoUI(pendId){
   }
 
   // Pedir motorista (SIEMPRE antes de despachar)
-  const motoristas = getMotoristasOp();
+  const motoristas = await loadMotoristasRepo();
+  const placas = await loadPlacasRepo();
   const r = await dsAbrir({
     motoristas,
+    placas,
     defaultId: p.motoristaId || "",
     defaultNombre: p.motoristaNombre || "",
     defaultPlaca: p.placa || ""
@@ -2861,7 +3103,7 @@ async function despacharGrupoPendientesSalidaOperador(groupKey){
   }
 
   // Pedir motorista (una sola vez)
-  const motoristas = getMotoristasOp();
+  const motoristas = await loadMotoristasRepo();
 
   const defaultId = String(groupList.find(x => String(x.motoristaId || "").trim())?.motoristaId || "");
   const defaultNombre = (key === "__SIN__") ? "" : String(groupList[0].motoristaNombre || "").trim();
@@ -2873,8 +3115,10 @@ async function despacharGrupoPendientesSalidaOperador(groupKey){
   );
   const defaultPlaca = (placasSet.size === 1) ? Array.from(placasSet)[0] : "";
 
+  const placas = await loadPlacasRepo();
   const r = await dsAbrir({
     motoristas,
+    placas,
     defaultId,
     defaultNombre,
     defaultPlaca
@@ -4147,16 +4391,20 @@ function renderSalidasOperador(){
 
         ${isOperador() ? `<div class="col">
           <label class="label">Motorista</label>
-          <select id="opSMotorista" onchange="onSalidaMotoristaChange(this.value)">
-            <option value="">-- Seleccionar --</option>
-            ${getMotoristasOp().map(m => `<option value="${m.id}" ${String(f.motoristaId||"")===String(m.id) ? "selected" : ""}>${escapeHtml(m.nombre || "")}</option>`).join("")}
-          </select>
-          ${getMotoristasOp().length ? "" : `<div class="muted">No hay motoristas. Ve a “Motoristas” y agrega uno.</div>`}
+          <div class="picker-row">
+            <input id="opSMotoristaNombre" readonly placeholder="Seleccionar motorista" value="${escapeHtml(f.motoristaNombre || "")}" onclick="opSeleccionarMotorista()" ${f.dispatchMode ? "disabled" : ""} />
+            <button type="button" class="secondary small" onclick="opSeleccionarMotorista()" ${f.dispatchMode ? "disabled" : ""}>Seleccionar</button>
+          </div>
+          <input type="hidden" id="opSMotoristaId" value="${escapeHtml(f.motoristaId || "")}" />
+          <button type="button" class="small danger" style="margin-top:8px;" onclick="opLimpiarMotorista()" ${f.dispatchMode ? "disabled" : ""}>Limpiar</button>
         </div>
 
         <div class="col">
           <label class="label">Placa</label>
-          <input id="opSPlaca" placeholder="Ej: HAA1234" value="${escapeHtml(f.placa || "")}" oninput="onSalidaPlacaChange(this.value)" />
+          <div class="picker-row">
+            <input id="opSPlaca" placeholder="Ej: HAA1234" value="${escapeHtml(f.placa || "")}" oninput="onSalidaPlacaChange(this.value)" ${f.dispatchMode ? "disabled" : ""} />
+            <button type="button" class="secondary small" onclick="opSeleccionarPlaca()" ${f.dispatchMode ? "disabled" : ""}>Seleccionar</button>
+          </div>
         ` : ``}
 
 
@@ -5785,7 +6033,7 @@ async function despacharGrupoPendientesSalidaOperador(groupKey){
   }
 
   // Pedir motorista (una sola vez)
-  const motoristas = getMotoristasOp();
+  const motoristas = await loadMotoristasRepo();
 
   const defaultId = String(groupList.find(x => String(x.motoristaId || "").trim())?.motoristaId || "");
   const defaultNombre = (key === "__SIN__") ? "" : String(groupList[0].motoristaNombre || "").trim();
@@ -5797,8 +6045,10 @@ async function despacharGrupoPendientesSalidaOperador(groupKey){
   );
   const defaultPlaca = (placasSet.size === 1) ? Array.from(placasSet)[0] : "";
 
+  const placas = await loadPlacasRepo();
   const r = await dsAbrir({
     motoristas,
+    placas,
     defaultId,
     defaultNombre,
     defaultPlaca
