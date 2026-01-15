@@ -58,11 +58,57 @@
   </header>
 
   <main>
+    <!-- ✅ HOME VENDEDOR (rediseñado) -->
     <div id="vendedorHome" class="hidden">
-      <button type="button" onclick="abrirCotizacion()">🧾 Nueva Cotización</button>
-      <button type="button" onclick="abrirClientes()">👤 Clientes</button>
-      <button type="button" onclick="abrirConsultaInventarioVendedor()">📦 Consulta de inventario</button>
-      <button type="button" class="secondary" onclick="abrirHistorialCotizaciones()">📑 Cotizaciones guardadas</button>
+      <div id="vendedorHomeUI" class="op-home ven-home">
+        <div class="op-hero">
+          <div>
+            <div class="op-hello">Panel de Ventas</div>
+            <div class="muted" style="margin-top:2px;">Cotizaciones guardadas visibles + accesos rápidos.</div>
+          </div>
+          <button type="button" class="secondary small" onclick="renderVendedorHomeDashboard(true)">⟳</button>
+        </div>
+
+        <div class="op-kpis">
+          <button type="button" id="venKpiBtnSaved" class="op-kpi op-kpi-btn" onclick="venHomeSelect('saved')" aria-label="Ver cotizaciones guardadas">
+            <div class="k">📑 Guardadas</div>
+            <div id="venHomeKpiSaved" class="v">0</div>
+          </button>
+          <button type="button" id="venKpiBtnCli" class="op-kpi op-kpi-btn" onclick="venHomeSelect('clientes')" aria-label="Ver clientes">
+            <div class="k">👤 Clientes</div>
+            <div id="venHomeKpiClientes" class="v">0</div>
+          </button>
+        </div>
+
+        <div id="venHomeSection" class="op-section card-lite">
+          <div class="op-section-head">
+            <h3 id="venHomeSectionTitle">📑 Cotizaciones guardadas</h3>
+          </div>
+          <div id="venHomeSavedBody"></div>
+        </div>
+
+        <div class="op-home-pad"></div>
+
+        <!-- ✅ Barra inferior (solo VENDEDOR) -->
+        <nav class="op-nav" aria-label="Menú vendedor">
+          <button type="button" class="op-nav-btn" onclick="abrirCotizacion()">
+            <span class="op-nav-ico">🧾</span>
+            <span class="op-nav-txt">Cotizar</span>
+          </button>
+          <button type="button" class="op-nav-btn" onclick="abrirModalNuevoClienteDesdeHome()">
+            <span class="op-nav-ico">👤</span>
+            <span class="op-nav-txt">Clientes</span>
+          </button>
+          <button type="button" class="op-nav-btn" onclick="abrirConsultaInventarioVendedor()">
+            <span class="op-nav-ico">📦</span>
+            <span class="op-nav-txt">Invent.</span>
+          </button>
+          <button type="button" class="op-nav-btn" onclick="venHomeSelect('saved')">
+            <span class="op-nav-ico">📑</span>
+            <span class="op-nav-txt">Guardadas</span>
+          </button>
+        </nav>
+      </div>
     </div>
 
     <!-- ✅ HOME OPERADOR / BODEGUERO (mismo contenedor, UI distinta por rol) -->
