@@ -65,18 +65,80 @@
       <button type="button" class="secondary" onclick="abrirHistorialCotizaciones()">📑 Cotizaciones guardadas</button>
     </div>
 
-    <!-- ✅ HOME OPERADOR -->
+    <!-- ✅ HOME OPERADOR / BODEGUERO (mismo contenedor, UI distinta por rol) -->
     <div id="operadorHome" class="hidden">
-      <button type="button" onclick="abrirInventarioOperador()">📦 Inventario</button>
-      <button type="button" onclick="abrirEntradasOperador()">📥 Entradas</button>
-      <button type="button" onclick="abrirSalidasOperador()">📤 Salidas</button>
-      <button type="button" id="btnPendientesSalida" onclick="abrirPendientesSalidaOperador()">🚚 Pendientes de salida</button>
-      <button type="button" id="btnProdPendientes" onclick="abrirPendientesOperador()">⏳ Productos pendientes</button>
-      <button type="button" onclick="abrirTransferenciasOperador()">🔄 Transferencias</button>
-      <button type="button" onclick="abrirConteosOperador()">✅ Conteos</button>
 
-      <button type="button" class="secondary" onclick="abrirMovimientosOperador()">📚 Movimientos</button>
-      <button type="button" class="danger" onclick="abrirNegativosOperador()">📉 Productos en negativo</button>
+      <!-- ✅ HOME OPERADOR (rediseñado) -->
+      <div id="operadorHomeUI" class="op-home hidden">
+        <div class="op-hero">
+          <div>
+            <div class="op-hello">Panel del Operador</div>
+            <div class="muted" style="margin-top:2px;">Pendientes siempre visibles + accesos rápidos.</div>
+          </div>
+          <button type="button" class="secondary small" onclick="renderOperadorHomeDashboard(true)">⟳</button>
+        </div>
+
+        <div class="op-kpis">
+          <button type="button" id="opKpiBtnPSD" class="op-kpi op-kpi-btn" onclick="opHomeSelect('psd')" aria-label="Ver pendientes de salida">
+            <div class="k">🚚 Pend. salida</div>
+            <div id="opHomeKpiPSD" class="v">0</div>
+          </button>
+          <button type="button" id="opKpiBtnPend" class="op-kpi op-kpi-btn" onclick="opHomeSelect('pend')" aria-label="Ver facturas con pendientes">
+            <div class="k">⏳ Pendientes</div>
+            <div id="opHomeKpiPend" class="v">0</div>
+          </button>
+        </div>
+
+        <div class="op-section card-lite">
+          <div class="op-section-head">
+            <h3 id="opHomeSummaryTitle">🚚 Pendientes de salida</h3>
+            <button type="button" class="small secondary" onclick="opHomeOpenFull()">Ver todo</button>
+          </div>
+          <div id="opHomeSummaryBody"></div>
+        </div>
+
+        <div class="op-home-pad"></div>
+
+        <!-- ✅ Barra interactiva (solo en HOME OPERADOR) -->
+        <nav class="op-nav" aria-label="Menú operador">
+          <button type="button" class="op-nav-btn" onclick="abrirInventarioOperador()">
+            <span class="op-nav-ico">📦</span>
+            <span class="op-nav-txt">Inventario</span>
+          </button>
+          <button type="button" class="op-nav-btn" onclick="abrirEntradasOperador()">
+            <span class="op-nav-ico">📥</span>
+            <span class="op-nav-txt">Entradas</span>
+          </button>
+          <button type="button" class="op-nav-btn" onclick="abrirSalidasOperador()">
+            <span class="op-nav-ico">📤</span>
+            <span class="op-nav-txt">Salidas</span>
+          </button>
+          <button type="button" class="op-nav-btn" onclick="abrirTransferenciasOperador()">
+            <span class="op-nav-ico">🔄</span>
+            <span class="op-nav-txt">Transf.</span>
+          </button>
+          <button type="button" class="op-nav-btn" onclick="abrirConteosOperador()">
+            <span class="op-nav-ico">✅</span>
+            <span class="op-nav-txt">Conteos</span>
+          </button>
+          <button type="button" class="op-nav-btn" onclick="openModal('modalOpMenu')">
+            <span class="op-nav-ico">☰</span>
+            <span class="op-nav-txt">Más</span>
+          </button>
+        </nav>
+      </div>
+
+      <!-- ✅ HOME BODEGUERO (no cambia) -->
+      <div id="bodegueroHomeUI" class="hidden">
+        <button type="button" onclick="abrirInventarioOperador()">📦 Inventario</button>
+        <button type="button" onclick="abrirEntradasOperador()">📥 Entradas</button>
+        <button type="button" onclick="abrirSalidasOperador()">📤 Salidas</button>
+        <button type="button" onclick="abrirTransferenciasOperador()">🔄 Transferencias</button>
+        <button type="button" onclick="abrirConteosOperador()">✅ Conteos</button>
+
+        <button type="button" class="secondary" onclick="abrirMovimientosOperador()">📚 Movimientos</button>
+        <button type="button" class="danger" onclick="abrirNegativosOperador()">📉 Productos en negativo</button>
+      </div>
     </div>
 
     <div id="contenido" class="hidden"></div>
@@ -411,6 +473,25 @@
 
     <div class="btn-row">
       <button type="button" class="secondary" onclick="pickPlacaCerrar()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: MENU OPERADOR (MAS) ================= -->
+<div id="modalOpMenu" class="modal">
+  <div class="modal-card">
+    <h3>Menú del operador</h3>
+    <p class="muted">Accesos rápidos a módulos adicionales.</p>
+
+    <div class="modal-list">
+      <button type="button" class="list-item" onclick="closeModal('modalOpMenu'); abrirMovimientosOperador();">📚 Movimientos</button>
+      <button type="button" class="list-item danger" onclick="closeModal('modalOpMenu'); abrirNegativosOperador();">📉 Productos en negativo</button>
+      <button type="button" class="list-item" onclick="closeModal('modalOpMenu'); abrirPendientesSalidaOperador();">🚚 Pendientes de salida</button>
+      <button type="button" class="list-item" onclick="closeModal('modalOpMenu'); abrirPendientesOperador();">⏳ Productos pendientes</button>
+    </div>
+
+    <div class="btn-row">
+      <button type="button" class="secondary" onclick="closeModal('modalOpMenu')">Cerrar</button>
     </div>
   </div>
 </div>
