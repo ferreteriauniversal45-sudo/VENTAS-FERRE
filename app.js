@@ -5,7 +5,6 @@ const URLS = {
   invP: BASE_RAW + "inventario.json",
   invA: BASE_RAW + "inventarioanexo.json",
   invT: BASE_RAW + "inventariotienda.json",
-  precios: BASE_RAW + "precios.json",
   preciosadmin: BASE_RAW + "preciosadmin.json",
   version: BASE_RAW + "inventario_version.json"
 };
@@ -48,6 +47,18 @@ function moneyL(value){
   const n = Number(value || 0);
   return "L. " + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+
+// Normaliza valores numéricos (evita NaN y precios negativos)
+function num0(value){
+  const n = Number(value);
+  return (typeof n === "number" && isFinite(n)) ? n : 0;
+}
+
+function price0(value){
+  const n = num0(value);
+  return n < 0 ? 0 : n;
+}
+
 
 function escapeHtml(s){
   return String(s ?? "")
@@ -689,12 +700,12 @@ async function ensureCatalogoCargado(){
       stockT,
       stockTotal: stockP + stockA + stockT,
       precios: {
-        precio: merged.precio,
-        precioA: merged.precioA,
-        precioB: merged.precioB,
-        precioC: merged.precioC,
-        mayoreo: merged.mayoreo,
-        precioVendedor: merged.precioVendedor || 0
+        precio: price0(merged.precio),
+        precioA: price0(merged.precioA),
+        precioB: price0(merged.precioB),
+        precioC: price0(merged.precioC),
+        mayoreo: price0(merged.mayoreo),
+        precioVendedor: price0(merged.precioVendedor)
       },
       admin: {
         costo: Number(merged.costo ?? 0),
