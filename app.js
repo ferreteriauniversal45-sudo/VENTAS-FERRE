@@ -710,6 +710,8 @@ const roleText = el("roleText");
 
 const vendedorHome = el("vendedorHome");
 const operadorHome = el("operadorHome");
+const operadorHomeUI = el("operadorHomeUI");
+const bodegueroHomeUI = el("bodegueroHomeUI");
 const contenido = el("contenido");
 
 const headerTitle = el("headerTitle");
@@ -792,6 +794,9 @@ function startApp(){
   operadorHome.classList.add("hidden");
   contenido.classList.add("hidden");
 
+  if (operadorHomeUI) operadorHomeUI.classList.add("hidden");
+  if (bodegueroHomeUI) bodegueroHomeUI.classList.add("hidden");
+
   if (isVendedorRole(role)) {
     headerTitle.textContent = "Cotizaciones";
     vendedorHome.classList.remove("hidden");
@@ -799,12 +804,15 @@ function startApp(){
     headerTitle.textContent = (role === "BODEGUERO") ? "Bodeguero" : "Operador";
     operadorHome.classList.remove("hidden");
 
-    // ✅ En BODEGUERO ocultamos funciones exclusivas de OPERADOR (motoristas / pendientes)
-    const soloOperadorIds = ["btnPendientesSalida","btnMotoristas","btnProdPendientes"];
+    // ✅ UI distinta por rol (BODEGUERO NO cambia)
     if (role === "BODEGUERO") {
-      soloOperadorIds.forEach(id => { const b = el(id); if (b) b.style.display = "none"; });
+      if (operadorHomeUI) operadorHomeUI.classList.add("hidden");
+      if (bodegueroHomeUI) bodegueroHomeUI.classList.remove("hidden");
     } else {
-      soloOperadorIds.forEach(id => { const b = el(id); if (b) b.style.display = ""; });
+      if (bodegueroHomeUI) bodegueroHomeUI.classList.add("hidden");
+      if (operadorHomeUI) operadorHomeUI.classList.remove("hidden");
+      // Importante: retrasar para evitar TDZ (hay variables/lets definidas más abajo)
+      setTimeout(() => renderOperadorHomeDashboard(), 0);
     }
   } else if (role === "VISUALIZADOR") {
     headerTitle.textContent = "Inventario";
@@ -1264,6 +1272,9 @@ function volverHome(){
   vendedorHome.classList.add("hidden");
   operadorHome.classList.add("hidden");
 
+  if (operadorHomeUI) operadorHomeUI.classList.add("hidden");
+  if (bodegueroHomeUI) bodegueroHomeUI.classList.add("hidden");
+
   if (isVendedorRole(role)) {
     headerTitle.textContent = "Cotizaciones";
     vendedorHome.classList.remove("hidden");
@@ -1273,6 +1284,13 @@ function volverHome(){
   if (role === "OPERADOR" || role === "BODEGUERO") {
     headerTitle.textContent = (role === "BODEGUERO") ? "Bodeguero" : "Operador";
     operadorHome.classList.remove("hidden");
+
+    if (role === "BODEGUERO") {
+      if (bodegueroHomeUI) bodegueroHomeUI.classList.remove("hidden");
+    } else {
+      if (operadorHomeUI) operadorHomeUI.classList.remove("hidden");
+      setTimeout(() => renderOperadorHomeDashboard(), 0);
+    }
     return;
   }
 
@@ -1290,6 +1308,204 @@ function volverHome(){
 
   headerTitle.textContent = "Cotizaciones";
   vendedorHome.classList.remove("hidden");
+}
+
+
+/* ================= OPERADOR: HOME DASHBOARD ================= */
+
+// Modo de resumen en HOME OPERADOR: "psd" (pendientes de salida) o "pend" (pendientes de productos)
+let opHomeSummaryMode = null;
+
+function getOpHomeSummaryMode(){
+  if (opHomeSummaryMode === null) {
+    const saved = String(localStorage.getItem("opHomeSummaryMode") || "").trim().toLowerCase();
+    opHomeSummaryMode = (saved === "pend") ? "pend" : "psd";
+  }
+  return opHomeSummaryMode;
+}
+
+function opHomeSelect(mode){
+  opHomeSummaryMode = (String(mode || "").trim().toLowerCase() === "pend") ? "pend" : "psd";
+  localStorage.setItem("opHomeSummaryMode", opHomeSummaryMode);
+  updateOpHomeKpiActive();
+  renderOperadorHomeDashboard(true);
+}
+
+function opHomeOpenFull(){
+  const mode = getOpHomeSummaryMode();
+  if (mode === "pend") abrirPendientesOperador();
+  else abrirPendientesSalidaOperador();
+}
+
+function updateOpHomeKpiActive(){
+  const mode = getOpHomeSummaryMode();
+  const bPSD = el("opKpiBtnPSD");
+  const bPend = el("opKpiBtnPend");
+  if (bPSD) bPSD.classList.toggle("active", mode === "psd");
+  if (bPend) bPend.classList.toggle("active", mode === "pend");
+}
+
+function renderOperadorHomeDashboard(force = false){
+  // Solo aplica al rol OPERADOR
+  const role = localStorage.getItem("role");
+  if (role !== "OPERADOR") return;
+
+  const kPSD = el("opHomeKpiPSD");
+  const kPend = el("opHomeKpiPend");
+  const tSum = el("opHomeSummaryTitle");
+  const wSum = el("opHomeSummaryBody");
+
+  // Si el HOME operador no está presente, no hacemos nada
+  if (!kPSD && !kPend && !tSum && !wSum) return;
+
+  const psd = (typeof getPendientesSalidaDespachoOp === "function" ? getPendientesSalidaDespachoOp() : []) || [];
+  const pend = (typeof getPendientesOp === "function" ? getPendientesOp() : []) || [];
+
+  if (kPSD) kPSD.textContent = String(psd.length || 0);
+  if (kPend) kPend.textContent = String(pend.length || 0);
+
+  const mode = getOpHomeSummaryMode();
+  updateOpHomeKpiActive();
+
+  if (tSum) {
+    tSum.textContent = (mode === "pend")
+      ? "⏳ Facturas con productos pendientes"
+      : "🚚 Pendientes de salida";
+  }
+
+  if (wSum) {
+    wSum.innerHTML = (mode === "pend")
+      ? renderOpHomePend(pend)
+      : renderOpHomePSD(psd);
+  }
+}
+
+function renderOpHomePSD(list){
+  const arr = Array.isArray(list) ? list : [];
+  if (!arr.length) {
+    return `<div class="muted">No hay facturas pendientes de despacho.</div>`;
+  }
+
+  // Agrupar por motorista (SIN MOTORISTA aparte)
+  const groups = {};
+  arr.forEach(p => {
+    const nombre = String(p.motoristaNombre || "").trim();
+    const key = nombre ? nombre.toUpperCase() : "__SIN__";
+    if (!groups[key]) groups[key] = { display: nombre || "Sin motorista", items: [] };
+    groups[key].items.push(p);
+  });
+
+  const keys = Object.keys(groups).sort((a,b)=>{
+    if (a === "__SIN__") return -1;
+    if (b === "__SIN__") return 1;
+    return a.localeCompare(b);
+  });
+
+  const MAX_GROUPS = 4;
+  const shownKeys = keys.slice(0, MAX_GROUPS);
+
+  const html = shownKeys.map(k => {
+    const g = groups[k];
+    const open = (k === "__SIN__") ? "open" : "";
+
+    const MAX_IN = 3;
+    const shown = g.items.slice(0, MAX_IN);
+
+    const more = (g.items.length > MAX_IN)
+      ? `<div class="muted" style="margin-top:8px;">+${g.items.length - MAX_IN} factura(s) más… Usa <b>Ver todo</b> para ver el resto.</div>`
+      : ``;
+
+    return `
+      <details class="op-group" ${open}>
+        <summary>
+          <span>${escapeHtml(g.display)}</span>
+          <span class="badge">${g.items.length}</span>
+        </summary>
+        <div class="op-group-body">
+          <div class="btn-row" style="margin:10px 0;">
+            <button type="button" class="small" onclick="despacharGrupoPendientesSalidaOperador('${escSq(k)}')">🚚 Despachar todo (${g.items.length})</button>
+          </div>
+          ${shown.map(p => renderOpHomePSDMini(p)).join("")}
+          ${more}
+        </div>
+      </details>
+    `;
+  }).join("");
+
+  const note = (keys.length > MAX_GROUPS)
+    ? `<div class="muted">Mostrando ${MAX_GROUPS} de ${keys.length} motorista(s). Pulsa <b>Ver todo</b> para ver el resto.</div>`
+    : ``;
+
+  return html + note;
+}
+
+function renderOpHomePSDMini(p){
+  const items = Array.isArray(p.items) ? p.items : [];
+  const totalShip = items.reduce((a,x)=> a + Number(x.cantidad || 0), 0);
+  const totalPend = items.reduce((a,x)=> a + Number(x.pendiente || 0), 0);
+
+  const meta = [
+    p.facturaNo ? `Factura ${String(p.facturaNo)}` : "Factura",
+    p.placa ? `Placa ${String(p.placa)}` : "",
+    p.fecha ? `Fecha ${String(p.fecha)}` : ""
+  ].filter(Boolean).join(" • ");
+
+  return `
+    <div class="op-mini">
+      <div>
+        <div class="t">${escapeHtml(meta)}</div>
+        <div class="s">Enviar: ${Number(totalShip||0)} • Pend.: ${Number(totalPend||0)} • Líneas: ${items.length}</div>
+      </div>
+      <div class="op-mini-actions">
+        <button type="button" class="small secondary" onclick="abrirSalidasOperadorEditarPendiente('${escSq(p.id)}')">✏️</button>
+        <button type="button" class="small" onclick="despacharSalidaPendienteDespachoUI('${escSq(p.id)}')">🚚</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderOpHomePend(list){
+  const arr = Array.isArray(list) ? list : [];
+  if (!arr.length) {
+    return `<div class="muted">No hay facturas con productos pendientes.</div>`;
+  }
+
+  const MAX = 5;
+  const shown = arr.slice(0, MAX);
+
+  const html = shown.map(p => {
+    const items = Array.isArray(p.items) ? p.items : [];
+    const lineas = Number(p.totalLineas || items.length || 0);
+    const unid = Number(p.totalUnidades || 0);
+    const fecha = String((p.creadoAtISO || "").slice(0,10) || "");
+
+    const sub = [
+      fecha || "",
+      `${lineas} líneas`,
+      `${unid} unid.`
+    ].filter(Boolean).join(" • ");
+
+    const fno = String(p.facturaNo || "");
+
+    return `
+      <div class="op-mini">
+        <div>
+          <div class="t">Factura ${escapeHtml(fno)}</div>
+          <div class="s">${escapeHtml(sub)}</div>
+        </div>
+        <div class="op-mini-actions">
+          <button type="button" class="small" onclick="iniciarDespachoPendiente('${escSq(fno)}')">🚚</button>
+          <button type="button" class="small secondary" onclick="abrirPendientesOperador()">📋</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  const note = (arr.length > MAX)
+    ? `<div class="muted">Mostrando ${MAX} de ${arr.length}. Pulsa <b>Ver todo</b> para ver el resto.</div>`
+    : "";
+
+  return html + note;
 }
 
 
@@ -2637,6 +2853,9 @@ function getPendientesOp(){
 }
 function savePendientesOp(){
   lsWrite(LS_PENDIENTES_SALIDAS, pendientesSalidasOp);
+
+  // Refrescar widgets del HOME OPERADOR si existen
+  try { if (el("opHomeSummaryBody")) renderOperadorHomeDashboard(); } catch(e){}
 }
 
 
@@ -2654,6 +2873,9 @@ function getPendientesSalidaDespachoOp(){
 
 function savePendientesSalidaDespachoOp(){
   lsWrite(LS_PENDIENTES_SALIDA_DESPACHO, getPendientesSalidaDespachoOp());
+
+  // Refrescar widgets del HOME OPERADOR si existen
+  try { if (el("opHomeSummaryBody")) renderOperadorHomeDashboard(); } catch(e){}
 }
 
 function findSalidaPendienteDespachoById(id){
@@ -3081,8 +3303,17 @@ async function despacharSalidaPendienteDespachoUI(pendId){
   // Eliminar de la cola de despacho
   removeSalidaPendienteDespacho(pendId);
 
-  await uiAlert("✅ Despachado. Ya aparece en Movimientos.");
-  abrirMovimientosOperador();
+  await uiAlert("✅ Despachado. Se guardó en Movimientos.");
+
+  // Mantenerse en la vista actual (no navegar automáticamente)
+  try {
+    const w = el("opPSDWrap");
+    if (w) w.innerHTML = renderPendientesSalidaOperador();
+    const homeUI = el("operadorHomeUI");
+    if (homeUI && !homeUI.classList.contains("hidden")) {
+      renderOperadorHomeDashboard(true);
+    }
+  } catch(e) {}
 }
 
 
