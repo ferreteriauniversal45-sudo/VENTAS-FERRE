@@ -197,6 +197,8 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
   border:1px solid var(--borde);
   margin-bottom:8px;
   background:#fff;
+  color:var(--texto); /* importante: si el item es <button>, evita texto blanco sobre fondo blanco */
+  font-weight:800;
 }
 
 .list-item:active{
@@ -793,4 +795,24 @@ details.op-group summary::-webkit-details-marker{
 }
 .op-group-body{
   margin-top:10px;
+}
+
+/* ===== Pickers (Motoristas / Placas) ===== */
+.picker-row{
+  display:flex;
+  gap:8px;
+  align-items:center;
+}
+.picker-row input{
+  flex:1;
+}
+button.list-item{
+  width:100%;
+  text-align:left;
+  cursor:pointer;
+}
+.picker-empty{
+  padding:12px;
+  color:var(--gris);
+  font-size:13px;
 }
