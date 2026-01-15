@@ -71,7 +71,6 @@
       <button type="button" onclick="abrirEntradasOperador()">📥 Entradas</button>
       <button type="button" onclick="abrirSalidasOperador()">📤 Salidas</button>
       <button type="button" id="btnPendientesSalida" onclick="abrirPendientesSalidaOperador()">🚚 Pendientes de salida</button>
-      <button type="button" id="btnMotoristas" onclick="abrirMotoristasOperador()">👤 Motoristas</button>
       <button type="button" id="btnProdPendientes" onclick="abrirPendientesOperador()">⏳ Productos pendientes</button>
       <button type="button" onclick="abrirTransferenciasOperador()">🔄 Transferencias</button>
       <button type="button" onclick="abrirConteosOperador()">✅ Conteos</button>
@@ -361,13 +360,19 @@
     <p class="muted">Selecciona el motorista con el que se va la factura y registra la placa (opcional).</p>
 
     <label class="label">Motorista</label>
-    <select id="dsMotoristaSel"></select>
-
-    <div style="margin-top:-6px;"></div>
-    <input id="dsMotoristaManual" placeholder="Si no aparece en la lista, escribe el nombre aquí" />
+    <div class="picker-row">
+      <input id="dsMotoristaNombreDisplay" readonly placeholder="Toca para seleccionar..." onclick="dsSeleccionarMotorista()" />
+      <button type="button" class="secondary small" onclick="dsSeleccionarMotorista()">Seleccionar</button>
+    </div>
+    <input type="hidden" id="dsMotoristaId" />
+    <input type="hidden" id="dsMotoristaNombre" />
+    <button type="button" class="small danger" style="margin-top:8px;" onclick="dsLimpiarMotorista()">Limpiar</button>
 
     <label class="label">Placa (opcional)</label>
-    <input id="dsPlaca" placeholder="Ej: HAA1234" />
+    <div class="picker-row">
+      <input id="dsPlaca" placeholder="Ej: HAA1234" onclick="dsSeleccionarPlaca()" />
+      <button type="button" class="secondary small" onclick="dsSeleccionarPlaca()">Seleccionar</button>
+    </div>
 
     <div class="btn-row">
       <button type="button" class="secondary" onclick="dsCerrar(false)">Cancelar</button>
@@ -376,6 +381,39 @@
   </div>
 </div>
 
+
+
+<!-- ================= MODAL: SELECCIONAR MOTORISTA ================= -->
+<div id="modalPickMotorista" class="modal">
+  <div class="modal-card ui-modal-card">
+    <div class="ui-modal-icon">👤</div>
+    <h3>Seleccionar motorista</h3>
+    <p class="muted">Busca y selecciona un motorista desde el archivo del repositorio.</p>
+
+    <input id="pickMotoristaSearch" placeholder="Buscar..." oninput="pickMotoristaFiltrar()" />
+    <div id="pickMotoristaList" class="modal-list"></div>
+
+    <div class="btn-row">
+      <button type="button" class="secondary" onclick="pickMotoristaCerrar()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: SELECCIONAR PLACA ================= -->
+<div id="modalPickPlaca" class="modal">
+  <div class="modal-card ui-modal-card">
+    <div class="ui-modal-icon">🚗</div>
+    <h3>Seleccionar placa</h3>
+    <p class="muted">Selecciona el número de placa desde el archivo del repositorio.</p>
+
+    <input id="pickPlacaSearch" placeholder="Buscar..." oninput="pickPlacaFiltrar()" />
+    <div id="pickPlacaList" class="modal-list"></div>
+
+    <div class="btn-row">
+      <button type="button" class="secondary" onclick="pickPlacaCerrar()">Cerrar</button>
+    </div>
+  </div>
+</div>
 
 <!-- jsPDF -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
