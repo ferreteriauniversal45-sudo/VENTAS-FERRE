@@ -781,6 +781,19 @@ if (pinInput) {
   });
 }
 
+// ✅ Compatibilidad: asegura que los handlers del HTML puedan llamar estas funciones
+// (útil si el archivo se sirve como módulo o en ciertos WebViews).
+try {
+  window.selectRole = selectRole;
+  window.validatePin = validatePin;
+  window.resetLogin = resetLogin;
+  // HOME Vendedor
+  window.venHomeSelect = venHomeSelect;
+  window.renderVendedorHomeDashboard = renderVendedorHomeDashboard;
+  window.abrirModalNuevoClienteDesdeHome = abrirModalNuevoClienteDesdeHome;
+  window.compartirCotizacionGuardada = compartirCotizacionGuardada;
+} catch (e) {}
+
 function startApp(){
   loginScreen.classList.add("hidden");
   loginScreen.style.display = "none";
@@ -800,6 +813,9 @@ function startApp(){
   if (isVendedorRole(role)) {
     headerTitle.textContent = "Cotizaciones";
     vendedorHome.classList.remove("hidden");
+    setTimeout(() => {
+      try { renderVendedorHomeDashboard(true); } catch {}
+    }, 0);
   } else if (role === "OPERADOR" || role === "BODEGUERO") {
     headerTitle.textContent = (role === "BODEGUERO") ? "Bodeguero" : "Operador";
     operadorHome.classList.remove("hidden");
@@ -1278,6 +1294,10 @@ function volverHome(){
   if (isVendedorRole(role)) {
     headerTitle.textContent = "Cotizaciones";
     vendedorHome.classList.remove("hidden");
+    // ✅ HOME VENDEDOR (dashboard)
+    setTimeout(() => {
+      if (typeof renderVendedorHomeDashboard === "function") renderVendedorHomeDashboard();
+    }, 0);
     return;
   }
 
@@ -1308,6 +1328,166 @@ function volverHome(){
 
   headerTitle.textContent = "Cotizaciones";
   vendedorHome.classList.remove("hidden");
+}
+
+
+/* ================= VENDEDOR: HOME DASHBOARD ================= */
+
+// Modo de resumen en HOME VENDEDOR: "saved" (cotizaciones) o "clientes".
+let venHomeSummaryMode = null;
+
+function getVenHomeSummaryMode(){
+  if (venHomeSummaryMode === null) {
+    const saved = String(localStorage.getItem("venHomeSummaryMode") || "").trim().toLowerCase();
+    venHomeSummaryMode = (saved === "clientes") ? "clientes" : "saved";
+  }
+  return venHomeSummaryMode;
+}
+
+// Selecciona qué lista se muestra en el HOME (debajo de los KPIs)
+// opts: {scroll?: boolean, silent?: boolean}
+function venHomeSelect(mode, opts = {}){
+  const m = (String(mode || "").trim().toLowerCase() === "clientes") ? "clientes" : "saved";
+  venHomeSummaryMode = m;
+  localStorage.setItem("venHomeSummaryMode", m);
+
+  if (!opts.silent) updateVenHomeKpiActive();
+  renderVendedorHomeDashboard(true);
+
+  const doScroll = (opts.scroll !== false);
+  if (doScroll) {
+    const sec = el("venHomeSection");
+    if (sec) {
+      try { sec.scrollIntoView({ behavior: "smooth", block: "start" }); } catch {}
+    }
+  }
+}
+
+function updateVenHomeKpiActive(){
+  const mode = getVenHomeSummaryMode();
+  const bSaved = el("venKpiBtnSaved");
+  const bCli = el("venKpiBtnCli");
+  if (bSaved) bSaved.classList.toggle("active", mode === "saved");
+  if (bCli) bCli.classList.toggle("active", mode === "clientes");
+
+  const title = el("venHomeSectionTitle");
+  if (title) title.textContent = (mode === "clientes") ? "👤 Clientes guardados" : "📑 Cotizaciones guardadas";
+}
+
+function renderVendedorHomeDashboard(force = false){
+  const role = localStorage.getItem("role");
+  if (!isVendedorRole(role)) return;
+
+  const kSaved = el("venHomeKpiSaved");
+  const kCli = el("venHomeKpiClientes");
+  const body = el("venHomeSavedBody");
+
+  // Si el HOME vendedor no está presente, no hacemos nada
+  if (!kSaved && !kCli && !body) return;
+
+  // refrescar data local
+  try {
+    cotizaciones = JSON.parse(localStorage.getItem("cotizaciones") || "[]");
+  } catch { cotizaciones = []; }
+
+  try {
+    clientes = JSON.parse(localStorage.getItem("clientes") || "[]");
+  } catch { clientes = []; }
+
+  const savedCount = Array.isArray(cotizaciones) ? cotizaciones.length : 0;
+  const cliCount = Array.isArray(clientes) ? clientes.length : 0;
+
+  if (kSaved) kSaved.textContent = String(savedCount);
+  if (kCli) kCli.textContent = String(cliCount);
+
+  // activar estado visual + título
+  updateVenHomeKpiActive();
+
+  const mode = getVenHomeSummaryMode();
+  if (body) {
+    body.innerHTML = (mode === "clientes")
+      ? renderVenHomeClientes(clientes)
+      : renderVenHomeSaved(cotizaciones);
+  }
+}
+
+function renderVenHomeSaved(list){
+  const arr = Array.isArray(list) ? list : [];
+  if (!arr.length) {
+    return `
+      <div class="muted" style="margin-bottom:10px;">No hay cotizaciones guardadas aún.</div>
+      <button type="button" onclick="abrirCotizacion()">🧾 Crear nueva cotización</button>
+    `;
+  }
+
+  const sorted = [...arr].sort((a,b)=>{
+    const ta = Number(a?.updatedAt || a?.creadoAt || a?.id || 0);
+    const tb = Number(b?.updatedAt || b?.creadoAt || b?.id || 0);
+    return tb - ta;
+  });
+
+  const html = sorted.map(c => {
+    const id = c?.id ?? "";
+    const idSq = escSq(String(id));
+    const total = Number(c?.total || 0);
+    const fecha = String(c?.fecha || "").trim();
+    const cliente = c?.cliente?.nombre ? String(c.cliente.nombre) : "Sin cliente";
+    const sub = [fecha, cliente].filter(Boolean).join(" • ");
+
+    return `
+      <div class="op-mini">
+        <div>
+          <div class="t">🧾 #${escapeHtml(String(id))} • ${moneyL(total)}</div>
+          <div class="s">${escapeHtml(sub)}</div>
+        </div>
+        <div class="op-mini-actions">
+          <button type="button" class="small secondary" onclick="editarCotizacionGuardada('${idSq}')">✏️</button>
+          <button type="button" class="small" onclick="compartirCotizacionGuardada('${idSq}')">📤</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  return html;
+}
+
+function renderVenHomeClientes(list){
+  const arr = Array.isArray(list) ? list : [];
+
+  if (!arr.length) {
+    return `<div class="card"><strong>No hay clientes guardados.</strong></div>`;
+  }
+
+  const sorted = [...arr].sort((a,b)=>{
+    const na = String(a?.nombre || "").toLowerCase();
+    const nb = String(b?.nombre || "").toLowerCase();
+    if (na < nb) return -1;
+    if (na > nb) return 1;
+    return 0;
+  });
+
+  return sorted.map(c => {
+    const nombre = (c?.nombre || "Cliente sin nombre").trim() || "Cliente sin nombre";
+    const empresa = (c?.empresa || "").trim();
+    const tel = (c?.telefono || "").trim();
+    const sub = [empresa ? `🏢 ${empresa}` : "", tel ? `📞 ${tel}` : ""].filter(Boolean).join(" • ");
+    const telSq = escSq(tel);
+
+    return `
+      <div class="op-mini">
+        <div>
+          <div class="t">👤 ${escapeHtml(nombre)}</div>
+          <div class="s">${escapeHtml(sub || "—")}</div>
+        </div>
+        <div class="op-mini-actions">
+          ${tel ? `
+            <button type="button" class="small secondary" onclick="llamarCliente('${telSq}')">📞</button>
+            <button type="button" class="small" onclick="whatsappCliente('${telSq}')">💬</button>
+          ` : `<span class="muted">Sin tel.</span>`}
+        </div>
+      </div>
+    `;
+  }).join("");
 }
 
 
@@ -1834,8 +2014,26 @@ function seleccionarClienteCot(id){
   renderCotizacion();
 }
 
+// Origen del modal de nuevo cliente: "cot" (desde cotización) o "home" (desde HOME del vendedor)
+let nuevoClienteModalOrigin = "cot";
+
 function abrirModalNuevoClienteDesdeCot(){
+  nuevoClienteModalOrigin = "cot";
   cerrarModalClientes();
+
+  el("ncNombre").value = "";
+  el("ncEmpresa").value = "";
+  el("ncTelefono").value = "";
+  el("ncRTN").value = "";
+  el("ncUbicacion").value = "";
+
+  openModal("modalNuevoCliente");
+  setTimeout(() => el("ncNombre").focus(), 50);
+}
+
+// Desde el HOME del vendedor (barra inferior "Clientes")
+function abrirModalNuevoClienteDesdeHome(){
+  nuevoClienteModalOrigin = "home";
 
   el("ncNombre").value = "";
   el("ncEmpresa").value = "";
@@ -1864,10 +2062,17 @@ function guardarNuevoClienteModal(){
   clientes.push(nuevo);
   localStorage.setItem("clientes", JSON.stringify(clientes));
 
-  cotizacionActual.clienteId = nuevo.id;
+  // Si se abrió desde una cotización, seleccionarlo y volver a la cotización
+  if (nuevoClienteModalOrigin === "cot") {
+    cotizacionActual.clienteId = nuevo.id;
+    cerrarModalNuevoCliente();
+    renderCotizacion();
+    return;
+  }
 
+  // Si se abrió desde el HOME, solo guardamos y refrescamos el HOME
   cerrarModalNuevoCliente();
-  renderCotizacion();
+  try { renderVendedorHomeDashboard(true); } catch {}
 }
 
 /* ================= MODAL PRODUCTOS + MODAL AGREGAR PRODUCTO ================= */
@@ -2489,7 +2694,22 @@ function descargarArchivo() {
 }
 
 /* ================= HISTORIAL ================= */
+// ✅ Ya no usamos la pantalla vieja de "Cotizaciones guardadas".
+// Ahora todo se muestra directamente en el HOME del VENDEDOR.
 function abrirHistorialCotizaciones(){
+  const role = localStorage.getItem("role");
+  if (isVendedorRole(role)) {
+    // Forzar a HOME y mostrar la vista de guardadas
+    localStorage.setItem("venHomeSummaryMode", "saved");
+    volverHome();
+    // scroll suave al resumen
+    setTimeout(() => {
+      if (typeof venHomeSelect === "function") venHomeSelect("saved", { scroll: true, silent: true });
+    }, 0);
+    return;
+  }
+
+  // Fallback (por si algún otro rol lo usa)
   vendedorHome.classList.add("hidden");
   operadorHome.classList.add("hidden");
   contenido.classList.remove("hidden");
@@ -2622,9 +2842,36 @@ async function editarCotizacionGuardada(id){
 
 
 function generarPdfDesdeGuardada(id){
-  const c = cotizaciones.find(x => x.id === id);
+  const c = cotizaciones.find(x => String(x.id) === String(id));
   if (!c) return;
   crearPdfCotizacion(c);
+}
+
+// En HOME del vendedor, el botón "Compartir" genera el PDF y, si es Android,
+// lanza el compartidor automáticamente.
+async function compartirCotizacionGuardada(id){
+  try {
+    cotizaciones = JSON.parse(localStorage.getItem("cotizaciones") || "[]");
+  } catch { cotizaciones = []; }
+
+  const c = (Array.isArray(cotizaciones) ? cotizaciones : []).find(x => String(x?.id) === String(id));
+  if (!c) {
+    alert("No se encontró la cotización guardada.");
+    return;
+  }
+
+  try {
+    await crearPdfCotizacion(c);
+  } catch (e) {
+    console.error(e);
+    alert("❌ No se pudo generar el PDF.");
+    return;
+  }
+
+  // Auto-share solo en Android (en web dejamos la vista previa)
+  if (window.Android && typeof window.Android.guardarPdfBase64 === "function") {
+    try { compartirArchivo(); } catch {}
+  }
 }
 
 function limpiarTelefono(num) {
