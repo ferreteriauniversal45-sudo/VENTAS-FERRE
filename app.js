@@ -88,8 +88,399 @@ function safeDecodeURIComponent(value) {
 }
 
 
-function openModal(id){ el(id).classList.add("show"); }
-function closeModal(id){ el(id).classList.remove("show"); }
+function openModal(id){
+  const m = el(id);
+  if (!m) return;
+
+  // Elevar z-index para que este modal quede arriba del que ya esté abierto
+  try {
+    const open = Array.from(document.querySelectorAll('.modal.show'));
+    let top = 0;
+    for (const om of open) {
+      const z = parseInt(window.getComputedStyle(om).zIndex || '0', 10);
+      if (!Number.isNaN(z)) top = Math.max(top, z);
+    }
+
+    const base = parseInt(window.getComputedStyle(m).zIndex || '0', 10) || 1000;
+    const target = Math.max(base, top + 10);
+    m.style.zIndex = String(target);
+  } catch {
+    // si algo falla, igual abrimos el modal
+  }
+
+  m.classList.add('show');
+}
+
+function closeModal(id){
+  const m = el(id);
+  if (!m) return;
+  m.classList.remove('show');
+}
+
+
+
+
+/* ================= PHONE BACK (botón Atrás del teléfono) ================= */
+let __phoneBackEnabled = false;
+let __allowNativeBackOnce = false;
+let __lastHomeBack = 0;
+let __toastTimer = null;
+
+function showToast(msg, ms = 1400){
+  if (!msg) return;
+  let t = el('appToast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'appToast';
+    t.className = 'toast';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.classList.add('show');
+  if (__toastTimer) clearTimeout(__toastTimer);
+  __toastTimer = setTimeout(() => {
+    try { t.classList.remove('show'); } catch {}
+  }, ms);
+}
+
+function closeTopmostModal(){
+  const open = Array.from(document.querySelectorAll('.modal.show'));
+  if (!open.length) return false;
+
+  let top = open[0];
+  let topZ = -Infinity;
+  for (const m of open) {
+    const z = parseInt(window.getComputedStyle(m).zIndex || '0', 10);
+    if (!Number.isNaN(z) && z >= topZ) {
+      topZ = z;
+      top = m;
+    }
+  }
+  top.classList.remove('show');
+  return true;
+}
+
+function clickVisibleBackButton(){
+  const buttons = Array.from(document.querySelectorAll('button'));
+  for (const b of buttons) {
+    if (!b || b.disabled) continue;
+    if (b.offsetParent === null) continue; // no visible
+    const txt = (b.textContent || '').trim().toLowerCase();
+    if (!txt) continue;
+
+    const isBack =
+      txt.includes('volver') &&
+      (txt.includes('⬅') || txt.includes('atrás') || txt.includes('atras') || txt.startsWith('volver'));
+
+    if (isBack) {
+      try { b.click(); } catch {}
+      return true;
+    }
+  }
+  return false;
+}
+
+function handlePhoneBackAction(){
+  // 1) Si hay un modal abierto, cerrarlo primero
+  if (closeTopmostModal()) return true;
+
+  // 2) Si hay un botón "Volver" visible, usarlo
+  if (clickVisibleBackButton()) return true;
+
+  // 3) Si estamos en pantalla secundaria sin botón volver, regresar a HOME
+  try {
+    if (typeof contenido !== 'undefined' && contenido && !contenido.classList.contains('hidden')) {
+      if (typeof volverHome === 'function') {
+        volverHome();
+        return true;
+      }
+    }
+  } catch {}
+
+  return false; // ya estamos en “root”
+}
+
+function onPhoneBackPopstate(){
+  if (!__phoneBackEnabled) return;
+
+  // cuando permitimos salida nativa (doble atrás)
+  if (__allowNativeBackOnce) {
+    __allowNativeBackOnce = false;
+    return;
+  }
+
+  const handled = handlePhoneBackAction();
+
+  if (handled) {
+    try { history.pushState({ __appTrap: true, t: Date.now() }, '', location.href); } catch {}
+    return;
+  }
+
+  // Ya está en inicio/root: no salir a la primera
+  const now = Date.now();
+  if (now - __lastHomeBack < 1500) {
+    __allowNativeBackOnce = true;
+    try { history.back(); } catch {}
+    return;
+  }
+
+  __lastHomeBack = now;
+  showToast('Presiona atrás otra vez para salir');
+  try { history.pushState({ __appTrap: true, t: Date.now() }, '', location.href); } catch {}
+}
+
+function enablePhoneBackBehavior(){
+  if (__phoneBackEnabled) return;
+  __phoneBackEnabled = true;
+
+  try {
+    // Estado base + estado trampa. Así el botón Atrás no te saca de la app.
+    history.replaceState({ __appBase: true }, '', location.href);
+    history.pushState({ __appTrap: true, t: Date.now() }, '', location.href);
+  } catch {}
+
+  window.addEventListener('popstate', onPhoneBackPopstate);
+}
+/* ================= THEME (claro/oscuro) ================= */
+const THEME_KEY = "theme"; // "light" | "dark"
+
+function getSystemTheme(){
+  try {
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  } catch (e) {
+    return "light";
+  }
+}
+
+function applyTheme(theme, persist = true){
+  const t = (theme === "dark" || theme === "light") ? theme : getSystemTheme();
+  document.documentElement.setAttribute("data-theme", t);
+  if (persist) {
+    try { localStorage.setItem(THEME_KEY, t); } catch {}
+  }
+  updateThemeUI();
+}
+
+function toggleTheme(){
+  const current = document.documentElement.getAttribute("data-theme") || getSystemTheme();
+  applyTheme(current === "dark" ? "light" : "dark");
+}
+
+function initTheme(){
+  const saved = (localStorage.getItem(THEME_KEY) || "").trim().toLowerCase();
+  if (saved) {
+    applyTheme(saved, true);
+  } else {
+    applyTheme(getSystemTheme(), false);
+  }
+
+  // si el usuario no eligió manualmente, seguir el sistema
+  if (!saved) {
+    try {
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
+      mq.addEventListener?.("change", () => {
+        const stillEmpty = !(localStorage.getItem(THEME_KEY) || "").trim();
+        if (stillEmpty) applyTheme(getSystemTheme(), false);
+      });
+    } catch {}
+  }
+}
+
+function updateThemeUI(){
+  const t = document.documentElement.getAttribute("data-theme") || "light";
+  const btn = el("themeToggleBtn");
+  const hint = el("themeHint");
+
+  if (btn) btn.textContent = (t === "dark") ? "☀️ Cambiar a claro" : "🌙 Cambiar a oscuro";
+  if (hint) hint.textContent = (t === "dark") ? "Oscuro activado (guardado en este dispositivo)." : "Claro activado (guardado en este dispositivo).";
+}
+
+function updateSettingsInfo(){
+  const info = el("settingsInfo");
+  if (!info) return;
+
+  let role = "";
+  try { role = String(localStorage.getItem("role") || ""); } catch {}
+  let v = "";
+  try { v = String(localStorage.getItem("inventarioVersion") || "0"); } catch {}
+
+  const ts = new Date().toLocaleString("es-HN");
+  info.textContent = `Versión inventario: ${v} · Rol: ${role || "—"} · ${ts}`;
+}
+
+function openSettings(){
+  updateThemeUI();
+  updateSettingsInfo();
+  openModal("modalSettings");
+}
+
+initTheme();
+
+/* ================= BACKUP (export/import) ================= */
+const BACKUP_PREFIX_DRAFT = "opDraft_";
+const BACKUP_KEYS = [
+  "nombreVendedor",
+  "clientes",
+  "cotizaciones",
+  "inventarioVersion",
+  "preciosModificadosAdmin",
+  "venHomeSummaryMode",
+  "opHomeSummaryMode",
+  "invVendStockFiltro",
+  "movimientosUsuario",
+  "movimientos",
+  "facturasEntradas",
+  "facturasSalidas",
+  "transferencias",
+  "conteos",
+  THEME_KEY
+];
+
+function getBackupSnapshot(){
+  const storage = {};
+  const allow = new Set(BACKUP_KEYS);
+
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      if (allow.has(k) || k.startsWith(BACKUP_PREFIX_DRAFT)) {
+        storage[k] = String(localStorage.getItem(k) ?? "");
+      }
+    }
+  } catch {}
+
+  return {
+    meta: {
+      app: "Ferretería Universal",
+      createdAt: new Date().toISOString(),
+      inventarioVersion: String(localStorage.getItem("inventarioVersion") || "0")
+    },
+    storage
+  };
+}
+
+function downloadTextFile(filename, text, mime = "application/json"){
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function exportBackup(){
+  try {
+    const snap = getBackupSnapshot();
+    const stamp = new Date();
+    const y = stamp.getFullYear();
+    const m = String(stamp.getMonth() + 1).padStart(2, "0");
+    const d = String(stamp.getDate()).padStart(2, "0");
+    const hh = String(stamp.getHours()).padStart(2, "0");
+    const mm = String(stamp.getMinutes()).padStart(2, "0");
+    const ss = String(stamp.getSeconds()).padStart(2, "0");
+    const fn = `respaldo-ferreteria-${y}${m}${d}-${hh}${mm}${ss}.json`;
+    downloadTextFile(fn, JSON.stringify(snap, null, 2));
+    uiAlert?.("✅ Respaldo exportado.", { title: "Respaldo", icon: "✅" });
+  } catch (e) {
+    uiAlert?.("❌ No se pudo exportar el respaldo.", { title: "Respaldo", icon: "❌" });
+  }
+}
+
+function triggerBackupImport(){
+  const inp = el("backupFile");
+  if (inp) inp.click();
+}
+
+async function importBackupFromFile(file){
+  if (!file) return;
+
+  let text = "";
+  try {
+    text = await file.text();
+  } catch {
+    uiAlert?.("❌ No se pudo leer el archivo.", { title: "Respaldo", icon: "❌" });
+    return;
+  }
+
+  let data = null;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    uiAlert?.("❌ El archivo no es un JSON válido.", { title: "Respaldo", icon: "❌" });
+    return;
+  }
+
+  const storage = data?.storage;
+  if (!storage || typeof storage !== "object") {
+    uiAlert?.("❌ El archivo no tiene el formato esperado.", { title: "Respaldo", icon: "❌" });
+    return;
+  }
+
+  const ok = await uiConfirm(
+    "⚠️ Esto reemplazará los datos locales de este dispositivo con el respaldo. ¿Continuar?",
+    { title: "Importar respaldo", icon: "⚠️", okText: "Sí, importar", cancelText: "Cancelar" }
+  );
+  if (!ok) return;
+
+  try {
+    // limpiar solo claves conocidas
+    const allow = new Set(BACKUP_KEYS);
+    allow.forEach(k => { try { localStorage.removeItem(k); } catch {} });
+
+    // borrar drafts existentes
+    const toRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(BACKUP_PREFIX_DRAFT)) toRemove.push(k);
+    }
+    toRemove.forEach(k => { try { localStorage.removeItem(k); } catch {} });
+
+    // restaurar desde respaldo
+    for (const k of Object.keys(storage)) {
+      if (allow.has(k) || k.startsWith(BACKUP_PREFIX_DRAFT)) {
+        localStorage.setItem(k, String(storage[k] ?? ""));
+      }
+    }
+
+    updateThemeUI();
+
+    await uiAlert("✅ Respaldo importado. La app se recargará.", { title: "Respaldo", icon: "✅" });
+    location.reload();
+  } catch (e) {
+    uiAlert?.("❌ No se pudo importar el respaldo.", { title: "Respaldo", icon: "❌" });
+  }
+}
+
+async function clearLocalData(){
+  const ok = await uiConfirm(
+    "⚠️ Esto borrará clientes, cotizaciones y movimientos guardados en este teléfono. ¿Continuar?",
+    { title: "Limpiar datos", icon: "🗑️", okText: "Borrar", cancelText: "Cancelar" }
+  );
+  if (!ok) return;
+
+  try {
+    for (const k of BACKUP_KEYS) {
+      if (k === THEME_KEY) continue; // conservar tema
+      localStorage.removeItem(k);
+    }
+    // borrar drafts
+    const toRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(BACKUP_PREFIX_DRAFT)) toRemove.push(k);
+    }
+    toRemove.forEach(k => localStorage.removeItem(k));
+
+    await uiAlert("✅ Datos locales borrados. La app se recargará.", { title: "Limpiar datos", icon: "✅" });
+    location.reload();
+  } catch {
+    uiAlert?.("❌ No se pudo borrar.", { title: "Limpiar datos", icon: "❌" });
+  }
+}
 
 
 
@@ -848,6 +1239,10 @@ function startApp(){
       </div>
     `;
   }
+
+  // ✅ En móvil: capturar botón Atrás del teléfono para que funcione como el "Volver" de la app
+  try { enablePhoneBackBehavior(); } catch {}
+
 }
 
 function logout(){
