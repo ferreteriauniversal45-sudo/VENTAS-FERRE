@@ -216,16 +216,13 @@ function onPhoneBackPopstate(){
     return;
   }
 
-  // Ya está en inicio/root: no salir a la primera
+  // Ya está en inicio/root: NUNCA salir de la app desde el botón Atrás del teléfono.
+  // Solo “trampeamos” el historial y (opcional) avisamos sin spamear.
   const now = Date.now();
-  if (now - __lastHomeBack < 1500) {
-    __allowNativeBackOnce = true;
-    try { history.back(); } catch {}
-    return;
+  if (now - __lastHomeBack > 1800) {
+    __lastHomeBack = now;
+    // En HOME no hacemos nada (no salimos de la app).
   }
-
-  __lastHomeBack = now;
-  showToast('Presiona atrás otra vez para salir');
   try { history.pushState({ __appTrap: true, t: Date.now() }, '', location.href); } catch {}
 }
 
@@ -315,6 +312,144 @@ function openSettings(){
 }
 
 initTheme();
+
+/* ================= CALCULATOR (modales) ================= */
+let __calcTargetInputId = null;
+let __calcExpr = "";
+let __calcLast = null;
+
+function openCalcForInput(inputId){
+  __calcTargetInputId = String(inputId || "");
+  __calcLast = null;
+
+  // Prefill: si el input tiene un número, úsalo como inicio.
+  try {
+    const v = String(el(__calcTargetInputId)?.value ?? "").trim();
+    __calcExpr = v ? v : "";
+  } catch {
+    __calcExpr = "";
+  }
+
+  calcRender();
+  openModal("modalCalc");
+}
+
+function calcSanitize(expr){
+  // Permitimos solo números, operadores básicos y paréntesis.
+  return String(expr || "")
+    .replace(/×/g, "*")
+    .replace(/÷/g, "/")
+    .replace(/[^0-9+\-*/().\s]/g, "")
+    .trim();
+}
+
+function calcTryEval(expr){
+  const safe = calcSanitize(expr);
+  if (!safe) return null;
+  try {
+    // eslint-disable-next-line no-new-func
+    const out = Function("'use strict'; return (" + safe + ")")();
+    if (typeof out !== "number" || !Number.isFinite(out)) return null;
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+function calcRender(){
+  const disp = el("calcDisplay");
+  if (disp) disp.value = __calcExpr || "";
+
+  const resEl = el("calcResult");
+  if (!resEl) return;
+
+  const r = (__calcLast !== null) ? __calcLast : calcTryEval(__calcExpr);
+  if (r === null) {
+    resEl.textContent = "";
+  } else {
+    resEl.textContent = `= ${r}`;
+  }
+}
+
+function calcKey(k){
+  const key = String(k || "");
+  if (!key) return;
+  __calcExpr = (__calcExpr || "") + key;
+  __calcLast = null;
+  calcRender();
+}
+
+function calcClear(){
+  __calcExpr = "";
+  __calcLast = null;
+  calcRender();
+}
+
+function calcBackspace(){
+  __calcExpr = String(__calcExpr || "").slice(0, -1);
+  __calcLast = null;
+  calcRender();
+}
+
+function calcEquals(){
+  const r = calcTryEval(__calcExpr);
+  if (r === null) {
+    showToast("Expresión inválida");
+    return;
+  }
+  __calcLast = r;
+  // Reemplaza la expresión por el resultado para seguir calculando.
+  __calcExpr = String(r);
+  calcRender();
+}
+
+function calcFormatForTarget(inputEl, num){
+  if (!inputEl || typeof num !== "number" || !Number.isFinite(num)) return String(num ?? "");
+
+  const id = String(inputEl.id || "");
+  const step = String(inputEl.getAttribute("step") || "").trim();
+  const minAttr = inputEl.getAttribute("min");
+  const min = (minAttr === null || minAttr === undefined || minAttr === "") ? null : Number(minAttr);
+
+  // Precio: 2 decimales
+  if (/precio/i.test(id) || step === "0.01") {
+    let v = num;
+    if (min !== null && Number.isFinite(min)) v = Math.max(min, v);
+    return v.toFixed(2);
+  }
+
+  // Cantidad: entero (redondeo)
+  if (/qty|cantidad/i.test(id)) {
+    let v = Math.round(num);
+    if (min !== null && Number.isFinite(min)) v = Math.max(min, v);
+    return String(v);
+  }
+
+  // Default
+  let v = num;
+  if (min !== null && Number.isFinite(min)) v = Math.max(min, v);
+  return String(v);
+}
+
+function calcUse(){
+  const target = el(__calcTargetInputId);
+  if (!target) {
+    closeModal("modalCalc");
+    return;
+  }
+
+  const r = (__calcLast !== null) ? __calcLast : calcTryEval(__calcExpr);
+  if (r === null) {
+    showToast("Primero calcula un resultado");
+    return;
+  }
+
+  target.value = calcFormatForTarget(target, r);
+  try { target.dispatchEvent(new Event("input", { bubbles: true })); } catch {}
+  try { target.dispatchEvent(new Event("change", { bubbles: true })); } catch {}
+  closeModal("modalCalc");
+  setTimeout(() => { try { target.focus(); } catch {} }, 50);
+}
 
 /* ================= BACKUP (export/import) ================= */
 const BACKUP_PREFIX_DRAFT = "opDraft_";
