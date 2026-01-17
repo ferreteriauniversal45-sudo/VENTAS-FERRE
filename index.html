@@ -54,7 +54,10 @@
       </div>
     </div>
 
-    <button class="danger small" type="button" onclick="logout()">Salir</button>
+    <div class="header-right">
+      <button class="secondary small" type="button" onclick="openSettings()" aria-label="Abrir ajustes">⚙️</button>
+      <button class="danger small" type="button" onclick="logout()">Salir</button>
+    </div>
   </header>
 
   <main>
@@ -538,6 +541,38 @@
 
     <div class="btn-row">
       <button type="button" class="secondary" onclick="closeModal('modalOpMenu')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: AJUSTES ================= -->
+<div id="modalSettings" class="modal">
+  <div class="modal-card">
+    <h3>Ajustes</h3>
+    <p class="muted" id="settingsInfo">Opciones del dispositivo.</p>
+
+    <div class="card-lite">
+      <div class="label">Tema</div>
+      <button type="button" id="themeToggleBtn" class="secondary" onclick="toggleTheme()">🌙 Cambiar tema</button>
+      <div class="muted" id="themeHint">Se guarda en este dispositivo.</div>
+    </div>
+
+    <div class="card-lite">
+      <div class="label">Respaldo</div>
+      <button type="button" onclick="exportBackup()">💾 Exportar respaldo</button>
+      <input type="file" id="backupFile" class="hidden" accept="application/json" onchange="importBackupFromFile(this.files[0]); this.value=''" />
+      <button type="button" class="secondary" onclick="triggerBackupImport()">📥 Importar respaldo</button>
+      <div class="muted">Incluye clientes, cotizaciones, movimientos y ajustes locales.</div>
+    </div>
+
+    <div class="card-lite">
+      <div class="label">Datos locales</div>
+      <button type="button" class="danger" onclick="clearLocalData()">🗑️ Limpiar datos locales</button>
+      <div class="muted">Borra datos guardados en este teléfono (no afecta GitHub).</div>
+    </div>
+
+    <div class="btn-row">
+      <button type="button" class="secondary" onclick="closeModal('modalSettings')">Cerrar</button>
     </div>
   </div>
 </div>
