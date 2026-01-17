@@ -290,7 +290,10 @@
     <input id="addMovProducto" placeholder="Producto" disabled />
 
     <label class="label">Cantidad</label>
-    <input id="addMovQty" type="number" min="1" placeholder="Ej: 5" />
+    <div class="calc-input-row">
+      <input id="addMovQty" type="number" min="1" placeholder="Ej: 5" />
+      <button type="button" class="op-icon-btn secondary" onclick="openCalcForInput('addMovQty')" title="Calculadora">🧮</button>
+    </div>
 
     <div class="btn-row">
       <button type="button" onclick="confirmarAddMovItem()">Agregar</button>
@@ -311,14 +314,20 @@
     </div>
 
     <label class="label">Cantidad</label>
-    <input id="apCantidad" type="number" min="1" value="1" />
+    <div class="calc-input-row">
+      <input id="apCantidad" type="number" min="1" value="1" />
+      <button type="button" class="op-icon-btn secondary" onclick="openCalcForInput('apCantidad')" title="Calculadora">🧮</button>
+    </div>
 
     <label class="label">Tipo de precio</label>
     <select id="apTipoPrecio"></select>
 
     <div id="apPrecioManualWrap" class="hidden">
       <label class="label">PRECIO VENDEDOR (manual)</label>
-      <input id="apPrecioManual" type="number" step="0.01" min="0" placeholder="Ej: 250.00" />
+      <div class="calc-input-row">
+        <input id="apPrecioManual" type="number" step="0.01" min="0" placeholder="Ej: 250.00" />
+        <button type="button" class="op-icon-btn secondary" onclick="openCalcForInput('apPrecioManual')" title="Calculadora">🧮</button>
+      </div>
     </div>
 
     <div class="btn-row">
@@ -573,6 +582,47 @@
 
     <div class="btn-row">
       <button type="button" class="secondary" onclick="closeModal('modalSettings')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: CALCULADORA ================= -->
+<div id="modalCalc" class="modal">
+  <div class="modal-card">
+    <h3>🧮 Calculadora</h3>
+    <input id="calcDisplay" class="calc-display" placeholder="0" readonly />
+    <div id="calcResult" class="muted" style="margin:6px 0 10px;"></div>
+
+    <div class="calc-pad" aria-label="Teclado calculadora">
+      <button type="button" class="secondary" onclick="calcClear()">C</button>
+      <button type="button" class="secondary" onclick="calcKey('(')">(</button>
+      <button type="button" class="secondary" onclick="calcKey(')')">)</button>
+      <button type="button" class="secondary" onclick="calcKey('/')">÷</button>
+
+      <button type="button" onclick="calcKey('7')">7</button>
+      <button type="button" onclick="calcKey('8')">8</button>
+      <button type="button" onclick="calcKey('9')">9</button>
+      <button type="button" class="secondary" onclick="calcKey('*')">×</button>
+
+      <button type="button" onclick="calcKey('4')">4</button>
+      <button type="button" onclick="calcKey('5')">5</button>
+      <button type="button" onclick="calcKey('6')">6</button>
+      <button type="button" class="secondary" onclick="calcKey('-')">−</button>
+
+      <button type="button" onclick="calcKey('1')">1</button>
+      <button type="button" onclick="calcKey('2')">2</button>
+      <button type="button" onclick="calcKey('3')">3</button>
+      <button type="button" class="secondary" onclick="calcKey('+')">+</button>
+
+      <button type="button" onclick="calcKey('0')">0</button>
+      <button type="button" onclick="calcKey('.')">.</button>
+      <button type="button" class="secondary" onclick="calcBackspace()">⌫</button>
+      <button type="button" class="success" onclick="calcEquals()">=</button>
+    </div>
+
+    <div class="btn-row">
+      <button type="button" onclick="calcUse()">Usar</button>
+      <button type="button" class="secondary" onclick="closeModal('modalCalc')">Cerrar</button>
     </div>
   </div>
 </div>
