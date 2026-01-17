@@ -5,7 +5,26 @@
   --texto:#1F2937;
   --gris:#6B7280;
   --borde:#E5E7EB;
+  --panel:#ffffff;
+  --panel-2:#ffffff;
+  --input-bg:#ffffff;
+  --btn-secondary-bg:#E5E7EB;
+  --btn-secondary-fg:#111111;
+  --nav-bg: rgba(255,255,255,.95);
   --safe-bottom:0px;
+}
+
+:root[data-theme="dark"]{
+  --fondo:#0B1220;
+  --texto:#E5E7EB;
+  --gris:#9CA3AF;
+  --borde:#334155;
+  --panel:#111827;
+  --panel-2:#0F172A;
+  --input-bg:#0B1220;
+  --btn-secondary-bg:#1F2937;
+  --btn-secondary-fg:#E5E7EB;
+  --nav-bg: rgba(17,24,39,.92);
 }
 
 *{ box-sizing:border-box; font-family:system-ui, sans-serif; }
@@ -28,8 +47,8 @@ button{
 }
 
 button.secondary{
-  background:#E5E7EB;
-  color:#111;
+  background:var(--btn-secondary-bg);
+  color:var(--btn-secondary-fg);
 }
 
 button.danger{
@@ -55,10 +74,11 @@ input, select{
   width:100%;
   padding:12px;
   border-radius:10px;
-  border:1px solid #D1D5DB;
+  border:1px solid var(--borde);
   margin-bottom:10px;
   font-size:14px;
-  background:#fff;
+  background:var(--input-bg);
+  color:var(--texto);
 }
 
 .label{
@@ -83,7 +103,7 @@ input, select{
 }
 
 .login-card{
-  background:#fff;
+  background:var(--panel);
   padding:24px;
   border-radius:18px;
   width:90%;
@@ -129,6 +149,12 @@ input, select{
   gap:10px;
 }
 
+.header-right{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
 .logo-header{ height:40px; }
 
 .header-text h1{
@@ -142,7 +168,7 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
 
 /* ---------- Cards ---------- */
 .card{
-  background:#fff;
+  background:var(--panel);
   padding:14px;
   border-radius:14px;
   margin-bottom:10px;
@@ -151,7 +177,7 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
 }
 
 .card-lite{
-  background:#fff;
+  background:var(--panel);
   border:1px solid var(--borde);
   border-radius:14px;
   padding:12px;
@@ -173,7 +199,7 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
 .modal.show{ display:flex; }
 
 .modal-card{
-  background:#fff;
+  background:var(--panel);
   width:100%;
   max-width:420px;
   padding:20px;
@@ -187,7 +213,7 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
   border:1px solid var(--borde);
   border-radius:12px;
   padding:8px;
-  background:#fff;
+  background:var(--panel);
   margin-bottom:10px;
 }
 
@@ -196,7 +222,7 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
   border-radius:12px;
   border:1px solid var(--borde);
   margin-bottom:8px;
-  background:#fff;
+  background:var(--panel-2);
   color:var(--texto); /* importante: si el item es <button>, evita texto blanco sobre fondo blanco */
   font-weight:800;
 }
@@ -232,7 +258,7 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
 }
 
 .total-box{
-  background:#fff;
+  background:var(--panel);
   border:1px solid var(--borde);
   border-radius:14px;
   padding:12px;
@@ -245,7 +271,7 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
 }
 
 .item-row{
-  background:#fff;
+  background:var(--panel);
   border:1px solid var(--borde);
   border-radius:14px;
   padding:12px;
@@ -293,7 +319,7 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
 
 /* ---------- PDF preview ---------- */
 .pdf-box{
-  background:#fff;
+  background:var(--panel);
   border:1px solid var(--borde);
   border-radius:14px;
   padding:12px;
@@ -305,7 +331,7 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
   height:70vh;
   border:none;
   border-radius:12px;
-  background:#fff;
+  background:var(--panel);
 }
 
 .inventario-list {
@@ -314,7 +340,7 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
 }
 
 .inventario-item {
-  background: #fff;
+  background: var(--panel);
   border: 1px solid var(--borde);
   border-radius: 12px;
   padding: 12px;
@@ -475,7 +501,7 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
 }
 
 .op-table{
-  background:#fff;
+  background:var(--panel);
   border:1px solid var(--borde);
   border-radius:14px;
   overflow:hidden;
@@ -548,7 +574,7 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
 }
 
 .factura-card{
-  background:#fff;
+  background:var(--panel);
   border:1px solid var(--borde);
   border-radius:14px;
   padding:12px;
@@ -669,7 +695,7 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
 
 /* ===== VENDEDOR: Consulta de inventario (tickets) ===== */
 .ticket{
-  background:#fff;
+  background:var(--panel);
   border:1px solid var(--borde);
   border-radius:14px;
   padding:12px;
@@ -776,7 +802,7 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
 
 /* ===== OPERADOR: Pendientes de salida (agrupado por motorista) ===== */
 details.op-group{
-  background:#fff;
+  background:var(--panel);
   border:1px solid var(--borde);
   border-radius:14px;
   padding:12px;
@@ -843,7 +869,7 @@ button.list-item{
 }
 
 .op-kpi{
-  background:#fff;
+  background:var(--panel);
   border:1px solid var(--borde);
   border-radius:14px;
   padding:12px;
@@ -899,7 +925,7 @@ button.list-item{
   padding:10px;
   border:1px solid var(--borde);
   border-radius:12px;
-  background:#fff;
+  background:var(--panel);
   margin-bottom:8px;
 }
 .op-mini .t{ font-weight:950; }
@@ -913,7 +939,7 @@ button.list-item{
   left:12px;
   right:12px;
   bottom: calc(12px + env(safe-area-inset-bottom, 0px) + var(--safe-bottom));
-  background: rgba(255,255,255,.95);
+  background: var(--nav-bg);
   border:1px solid var(--borde);
   border-radius:18px;
   padding:10px;
@@ -978,3 +1004,23 @@ button.list-item{
   .op-home-pad{ height:64px; }
 }
 
+/* ---------- Toast (mensaje corto) ---------- */
+.toast{
+  position:fixed;
+  left:50%;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px) + var(--safe-bottom));
+  transform: translateX(-50%) translateY(10px);
+  background: rgba(17,24,39,.92);
+  color:#fff;
+  padding:10px 14px;
+  border-radius:999px;
+  font-size:14px;
+  font-weight:800;
+  z-index:4000;
+  opacity:0;
+  pointer-events:none;
+  transition: opacity .18s ease, transform .18s ease;
+  max-width: calc(100vw - 28px);
+  text-align:center;
+}
+.toast.show{ opacity:1; transform: translateX(-50%) translateY(0); }
