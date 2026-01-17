@@ -953,10 +953,6 @@ function pickPlacaCerrar(){
 /* ===== Hooks para Operador / Despacho ===== */
 async function opSeleccionarMotorista(){
   if (!salidaFactura) return;
-  if (salidaFactura.dispatchMode) {
-    await uiAlert("No puedes cambiar el motorista en modo despacho.");
-    return;
-  }
   const m = await pickMotoristaAbrir();
   if (!m) return;
 
@@ -973,8 +969,6 @@ async function opSeleccionarMotorista(){
 
 async function opSeleccionarPlaca(){
   if (!salidaFactura) return;
-  if (salidaFactura.dispatchMode) return;
-
   const placa = await pickPlacaAbrir();
   if (!placa) return;
 
@@ -985,7 +979,6 @@ async function opSeleccionarPlaca(){
 
 function opLimpiarMotorista(){
   if (!salidaFactura) return;
-  if (salidaFactura.dispatchMode) return;
   salidaFactura.motoristaId = "";
   salidaFactura.motoristaNombre = "";
   if (el("opSMotoristaId")) el("opSMotoristaId").value = "";
@@ -4361,8 +4354,9 @@ async function iniciarDespachoPendiente(facturaNo){
     fechaISO: hoy,
     facturaNo: fno,
     motoristaId: "",
-    motoristaNombre: "",
-    placa: "",
+    // Prefill del último despacho si existe
+    motoristaNombre: String(p.ultimoMotorista || "").trim(),
+    placa: String(p.ultimaPlaca || "").trim().toUpperCase(),
     dispatchMode: true,
     items: (Array.isArray(p.items) ? p.items : []).map(it => ({
       id: "s_" + Date.now() + "_" + Math.random().toString(16).slice(2),
@@ -5400,18 +5394,18 @@ function renderSalidasOperador(){
         ${isOperador() ? `<div class="col">
           <label class="label">Motorista</label>
           <div class="picker-row">
-            <input id="opSMotoristaNombre" readonly placeholder="Seleccionar motorista" value="${escapeHtml(f.motoristaNombre || "")}" onclick="opSeleccionarMotorista()" ${f.dispatchMode ? "disabled" : ""} />
-            <button type="button" class="secondary small" onclick="opSeleccionarMotorista()" ${f.dispatchMode ? "disabled" : ""}>Seleccionar</button>
+            <input id="opSMotoristaNombre" readonly placeholder="Seleccionar motorista" value="${escapeHtml(f.motoristaNombre || "")}" onclick="opSeleccionarMotorista()" />
+            <button type="button" class="secondary small" onclick="opSeleccionarMotorista()">Seleccionar</button>
           </div>
           <input type="hidden" id="opSMotoristaId" value="${escapeHtml(f.motoristaId || "")}" />
-          <button type="button" class="small danger" style="margin-top:8px;" onclick="opLimpiarMotorista()" ${f.dispatchMode ? "disabled" : ""}>Limpiar</button>
+          <button type="button" class="small danger" style="margin-top:8px;" onclick="opLimpiarMotorista()">Limpiar</button>
         </div>
 
         <div class="col">
           <label class="label">Placa</label>
           <div class="picker-row">
-            <input id="opSPlaca" placeholder="Ej: HAA1234" value="${escapeHtml(f.placa || "")}" oninput="onSalidaPlacaChange(this.value)" ${f.dispatchMode ? "disabled" : ""} />
-            <button type="button" class="secondary small" onclick="opSeleccionarPlaca()" ${f.dispatchMode ? "disabled" : ""}>Seleccionar</button>
+            <input id="opSPlaca" placeholder="Ej: HAA1234" value="${escapeHtml(f.placa || "")}" oninput="onSalidaPlacaChange(this.value)" />
+            <button type="button" class="secondary small" onclick="opSeleccionarPlaca()">Seleccionar</button>
           </div>
         ` : ``}
 
