@@ -207,6 +207,50 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
   box-shadow:0 14px 40px rgba(0,0,0,.35);
 }
 
+/* ---------- Inputs con botón (ej: calculadora) ---------- */
+.calc-input-row{
+  display:grid;
+  grid-template-columns: 1fr 40px;
+  gap:8px;
+  align-items:center;
+  margin-bottom:10px;
+}
+.calc-input-row input{ margin:0; }
+.calc-input-row button{ margin:0; }
+
+/* ---------- Calculadora ---------- */
+.calc-display{
+  width:100%;
+  padding:12px;
+  border-radius:12px;
+  border:1px solid var(--borde);
+  background:var(--input-bg);
+  color:var(--texto);
+  font-size:20px;
+  font-weight:900;
+  text-align:right;
+  margin-bottom:10px;
+}
+
+.calc-pad{
+  display:grid;
+  grid-template-columns:repeat(4, 1fr);
+  gap:8px;
+  margin-bottom:10px;
+}
+.calc-pad button{
+  margin:0;
+  padding:12px;
+  border-radius:12px;
+  font-size:16px;
+  font-weight:900;
+}
+
+button.success{
+  background:#16a34a;
+  color:#fff;
+}
+
 .modal-list{
   max-height:320px;
   overflow:auto;
