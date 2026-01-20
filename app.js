@@ -42,6 +42,95 @@ const PRICE_CODE_LETTER = {
   precioVendedor: "V"
 };
 
+/* ================= COTIZACIONES: CÓDIGOS VINCULADOS =================
+   Reglas solicitadas:
+   - 09-0039 ↔ 02-0203
+   - 02-0036 ↔ 02-0348
+
+   Si agregas/modificas la cantidad de uno, el otro se agrega/ajusta
+   automáticamente para quedar con la misma cantidad.
+*/
+const LINKED_CODE_MAP = {
+  "09-0039": "02-0203",
+  "02-0036": "02-0348",
+  "02-0348": "02-0036"
+};
+
+let __linkedSyncLock = false;
+
+function normCode(code){
+  return String(code ?? "").trim();
+}
+
+function getLinkedCode(code){
+  const c = normCode(code);
+  return LINKED_CODE_MAP[c] || null;
+}
+
+function findFirstItemByCodigo(code){
+  const c = normCode(code);
+  return cotizacionActual?.items?.find(it => normCode(it.codigo) === c) || null;
+}
+
+function findMatchingItem(codigo, priceType, customPrice){
+  const c = normCode(codigo);
+  const p = String(priceType || "precio");
+  const cp = Number(customPrice || 0);
+  return cotizacionActual?.items?.find(it =>
+    normCode(it.codigo) === c &&
+    String(it.priceType || "precio") === p &&
+    Number(it.customPrice || 0) === cp
+  ) || null;
+}
+
+function upsertItemSetQty(codigo, qty, priceType, customPrice){
+  const q = Math.max(1, Number(qty || 1));
+
+  let it = findMatchingItem(codigo, priceType, customPrice);
+  if (it) {
+    it.qty = q;
+    return it;
+  }
+
+  it = {
+    id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
+    codigo: normCode(codigo),
+    qty: q,
+    priceType: String(priceType || "precio"),
+    customPrice: Number(customPrice || 0)
+  };
+
+  cotizacionActual.items.push(it);
+  return it;
+}
+
+function syncLinkedPairForItem(it){
+  if (!it || __linkedSyncLock) return;
+
+  const pair = getLinkedCode(it.codigo);
+  if (!pair) return;
+
+  __linkedSyncLock = true;
+  try {
+    const refQty = Math.max(1, Number(it.qty || 1));
+
+    // Preferimos sincronizar con la misma configuración de precio si existe.
+    const refType = String(it.priceType || "precio");
+    const refCP = Number(it.customPrice || 0);
+
+    let target = findMatchingItem(pair, refType, refCP);
+    if (!target) target = findFirstItemByCodigo(pair);
+
+    if (target) {
+      target.qty = refQty;
+    } else {
+      upsertItemSetQty(pair, refQty, refType, refCP);
+    }
+  } finally {
+    __linkedSyncLock = false;
+  }
+}
+
 /* ================= HELPERS ================= */
 const el = (id) => document.getElementById(id);
 
@@ -283,26 +372,57 @@ function initTheme(){
   }
 }
 
+function setThemeFromSwitch(isDark){
+  applyTheme(isDark ? "dark" : "light");
+}
+
 function updateThemeUI(){
   const t = document.documentElement.getAttribute("data-theme") || "light";
   const btn = el("themeToggleBtn");
   const hint = el("themeHint");
+  const sw = el("themeSwitch");
 
-  if (btn) btn.textContent = (t === "dark") ? "☀️ Cambiar a claro" : "🌙 Cambiar a oscuro";
-  if (hint) hint.textContent = (t === "dark") ? "Oscuro activado (guardado en este dispositivo)." : "Claro activado (guardado en este dispositivo).";
+  if (sw) sw.checked = (t === "dark");
+  if (btn) btn.textContent = (t === "dark") ? "☀️ Claro" : "🌙 Oscuro";
+  if (hint) hint.textContent = (t === "dark") ? "Oscuro" : "Claro";
+}
+
+function formatDateShort(ts){
+  const n = Number(ts || 0);
+  if (!n) return "—";
+  try { return new Date(n).toLocaleDateString("es-HN"); } catch { return "—"; }
 }
 
 function updateSettingsInfo(){
-  const info = el("settingsInfo");
-  if (!info) return;
-
   let role = "";
   try { role = String(localStorage.getItem("role") || ""); } catch {}
   let v = "";
   try { v = String(localStorage.getItem("inventarioVersion") || "0"); } catch {}
 
-  const ts = new Date().toLocaleString("es-HN");
-  info.textContent = `Versión inventario: ${v} · Rol: ${role || "—"} · ${ts}`;
+  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin];
+  const lastSync = Math.max(0, ...invUrls.map(u => __getLastSyncTsForUrl(u)));
+
+  const online = (typeof navigator !== "undefined" && "onLine" in navigator)
+    ? (navigator.onLine ? "En línea" : "Offline")
+    : "—";
+
+  const bRole = el("badgeRole");
+  const bConn = el("badgeConn");
+  const bSync = el("badgeSync");
+
+  if (bRole) bRole.textContent = `Rol: ${role || "—"}`;
+  if (bConn) bConn.textContent = `Conexión: ${online}`;
+  if (bSync) bSync.textContent = `Sync: ${formatDateShort(lastSync)}`;
+
+  const invInfo = el("invCacheInfo");
+  if (invInfo) {
+    invInfo.textContent = lastSync ? `Últ. sync: ${formatDateTime(lastSync)}` : "Sin caché: conéctate una vez.";
+  }
+
+  const info = el("settingsInfo");
+  if (info) {
+    info.textContent = `Inventario v${v} · Rol: ${role || "—"} · Conexión: ${online} · Últ. sync: ${formatDateTime(lastSync)}`;
+  }
 }
 
 function openSettings(){
@@ -1184,11 +1304,181 @@ function stockDisponibleTotal(prod){
   return Number(prod.stockP || 0) + Number(prod.stockA || 0) + Number(prod.stockT || 0);
 }
 
-async function fetchJson(url){
-  const res = await fetch(url, { cache: "no-store" });
-  if(!res.ok) throw new Error(`HTTP ${res.status} - ${url}`);
-  return await res.json();
+/* ================= CACHE (offline) =================
+   - Guarda respuestas JSON en IndexedDB (fallback a localStorage)
+   - Si no hay conexión, usa la última copia guardada
+*/
+const __CACHE_DB_NAME = "fu_json_cache_v1";
+const __CACHE_STORE = "json";
+let __cacheDbPromise = null;
+let __cacheOfflineToastShown = false;
+
+function __b64(s){
+  try { return btoa(String(s || "")); } catch { return String(s || ""); }
 }
+function __cacheKey(prefix, url){
+  return `${prefix}:${__b64(url)}`;
+}
+
+async function __openCacheDb(){
+  if (__cacheDbPromise) return __cacheDbPromise;
+  __cacheDbPromise = new Promise((resolve, reject) => {
+    try {
+      if (!('indexedDB' in window)) return resolve(null);
+      const req = indexedDB.open(__CACHE_DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(__CACHE_STORE)) {
+          db.createObjectStore(__CACHE_STORE, { keyPath: 'url' });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+  return __cacheDbPromise;
+}
+
+async function __cacheGet(url){
+  const u = String(url || "");
+  if (!u) return null;
+
+  // 1) IndexedDB
+  try {
+    const db = await __openCacheDb();
+    if (db) {
+      const tx = db.transaction(__CACHE_STORE, 'readonly');
+      const store = tx.objectStore(__CACHE_STORE);
+      const req = store.get(u);
+      const rec = await new Promise((resolve) => {
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      });
+      if (rec && rec.data) return rec;
+    }
+  } catch {}
+
+  // 2) localStorage fallback
+  try {
+    const raw = localStorage.getItem(__cacheKey('fuCacheJson', u));
+    if (!raw) return null;
+    const ts = Number(localStorage.getItem(__cacheKey('fuCacheJsonTs', u)) || 0);
+    return { url: u, data: JSON.parse(raw), ts };
+  } catch {
+    return null;
+  }
+}
+
+async function __cacheSet(url, data){
+  const u = String(url || "");
+  if (!u) return;
+  const ts = Date.now();
+
+  // 1) IndexedDB
+  try {
+    const db = await __openCacheDb();
+    if (db) {
+      const tx = db.transaction(__CACHE_STORE, 'readwrite');
+      tx.objectStore(__CACHE_STORE).put({ url: u, data, ts });
+      // no await de tx.oncomplete para no bloquear UI
+    }
+  } catch {}
+
+  // 2) localStorage fallback
+  try {
+    localStorage.setItem(__cacheKey('fuCacheJson', u), JSON.stringify(data));
+    localStorage.setItem(__cacheKey('fuCacheJsonTs', u), String(ts));
+  } catch {}
+
+  try { localStorage.setItem(__cacheKey('fuCacheLastSync', u), String(ts)); } catch {}
+}
+
+async function __cacheDelete(url){
+  const u = String(url || "");
+  if (!u) return;
+
+  try {
+    const db = await __openCacheDb();
+    if (db) {
+      const tx = db.transaction(__CACHE_STORE, 'readwrite');
+      tx.objectStore(__CACHE_STORE).delete(u);
+    }
+  } catch {}
+
+  try {
+    localStorage.removeItem(__cacheKey('fuCacheJson', u));
+    localStorage.removeItem(__cacheKey('fuCacheJsonTs', u));
+    localStorage.removeItem(__cacheKey('fuCacheLastSync', u));
+  } catch {}
+}
+
+function __getLastSyncTsForUrl(url){
+  try {
+    const v = localStorage.getItem(__cacheKey('fuCacheLastSync', String(url||"")));
+    return Number(v || 0);
+  } catch {
+    return 0;
+  }
+}
+
+function formatDateTime(ts){
+  const n = Number(ts || 0);
+  if (!n) return "—";
+  try { return new Date(n).toLocaleString("es-HN"); } catch { return "—"; }
+}
+
+async function fetchJson(url, opts = {}){
+  const u = String(url || "");
+  const allowCache = (opts.allowCache !== false);
+  const timeoutMs = Number(opts.timeoutMs || 20000);
+
+  const fetchWithTimeout = async () => {
+    const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    const t = ctrl ? setTimeout(() => { try { ctrl.abort(); } catch {} }, timeoutMs) : null;
+    try {
+      const res = await fetch(u, { cache: "no-store", signal: ctrl ? ctrl.signal : undefined });
+      return res;
+    } finally {
+      if (t) clearTimeout(t);
+    }
+  };
+
+  try {
+    const res = await fetchWithTimeout();
+    if(!res.ok) throw new Error(`HTTP ${res.status} - ${u}`);
+    const data = await res.json();
+    if (allowCache) { try { await __cacheSet(u, data); } catch {} }
+    return data;
+  } catch (err) {
+    if (allowCache) {
+      const cached = await __cacheGet(u);
+      if (cached && cached.data) {
+        if (!__cacheOfflineToastShown) {
+          __cacheOfflineToastShown = true;
+          try { showToast("Sin conexión: usando caché guardada"); } catch {}
+        }
+        return cached.data;
+      }
+    }
+    throw err;
+  }
+}
+
+// Avisos cortos cuando cambia el estado de conexión (útil en WebView)
+(function setupOnlineOfflineToasts(){
+  try {
+    window.addEventListener('offline', () => {
+      try { showToast("Modo offline"); } catch {}
+    });
+    window.addEventListener('online', () => {
+      // permitir que vuelva a mostrar el aviso de "usando caché" si cae la red otra vez
+      try { __cacheOfflineToastShown = false; } catch {}
+      try { showToast("Conexión restaurada ✅"); } catch {}
+    });
+  } catch {}
+})();
 
 /* ================= STATE ================= */
 let selectedRole = null;
@@ -1311,6 +1601,9 @@ try {
   window.renderVendedorHomeDashboard = renderVendedorHomeDashboard;
   window.abrirModalNuevoClienteDesdeHome = abrirModalNuevoClienteDesdeHome;
   window.compartirCotizacionGuardada = compartirCotizacionGuardada;
+  // Ajustes (inventario offline)
+  window.refreshInventoryNow = refreshInventoryNow;
+  window.clearInventoryCache = clearInventoryCache;
 } catch (e) {}
 
 function startApp(){
@@ -1437,8 +1730,8 @@ function ensureNombreVendedor(actionObj){
 }
 
 /* ================= CATALOGO ================= */
-async function ensureCatalogoCargado(){
-  if (catalogoCargado) return;
+async function ensureCatalogoCargado(forceRefresh = false){
+  if (catalogoCargado && !forceRefresh) return;
 
   await checkVersionAndReload();
 
@@ -1512,6 +1805,41 @@ async function ensureCatalogoCargado(){
   catalogo.sort((x,y) => (x.producto||"").localeCompare(y.producto||"", "es"));
   inventarioAdmin.sort((x,y) => (x.producto||"").localeCompare(y.producto||"", "es"));
   catalogoCargado = true;
+}
+
+// === Acciones de Ajustes: sincronizar y limpiar caché ===
+function __getInvGroupLastSync(){
+  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin];
+  return Math.max(0, ...invUrls.map(u => __getLastSyncTsForUrl(u)));
+}
+
+async function refreshInventoryNow(){
+  const before = __getInvGroupLastSync();
+  try { showToast("Actualizando inventario..."); } catch {}
+
+  try {
+    await ensureCatalogoCargado(true);
+    const after = __getInvGroupLastSync();
+    if (after > before) {
+      try { showToast("Inventario actualizado ✅"); } catch {}
+    } else {
+      try { showToast("Sin conexión: se mantuvo la caché"); } catch {}
+    }
+  } catch (e) {
+    console.warn("No se pudo refrescar inventario:", e);
+    try { showToast("No se pudo actualizar"); } catch {}
+  }
+
+  try { updateSettingsInfo(); } catch {}
+}
+
+async function clearInventoryCache(){
+  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin];
+  for (const u of invUrls) {
+    try { await __cacheDelete(u); } catch {}
+  }
+  try { showToast("Caché limpiada"); } catch {}
+  try { updateSettingsInfo(); } catch {}
 }
 
 /* ================= INVENTARIO ADMIN ================= */
@@ -2449,6 +2777,7 @@ function incQty(id){
   const it = findItemById(id);
   if (!it) return;
   it.qty = Number(it.qty || 1) + 1;
+  syncLinkedPairForItem(it);
   renderItems();
 }
 
@@ -2456,6 +2785,7 @@ function decQty(id){
   const it = findItemById(id);
   if (!it) return;
   it.qty = Math.max(1, Number(it.qty || 1) - 1);
+  syncLinkedPairForItem(it);
   renderItems();
 }
 
@@ -2463,6 +2793,7 @@ function setQty(id, val){
   const it = findItemById(id);
   if (!it) return;
   it.qty = Math.max(1, Number(val || 1));
+  syncLinkedPairForItem(it);
   renderItems();
 }
 
@@ -2494,7 +2825,22 @@ function setItemCustomPrice(id, val){
 }
 
 function removeItem(id){
-  cotizacionActual.items = cotizacionActual.items.filter(x => String(x.id) !== String(id));
+  const it = findItemById(id);
+  if (!it) return;
+
+  const code = normCode(it.codigo);
+  const pair = getLinkedCode(code);
+
+  if (pair) {
+    cotizacionActual.items = cotizacionActual.items.filter(x => {
+      const c = normCode(x.codigo);
+      return c !== code && c !== pair;
+    });
+    showToast(`🗑️ También se eliminó ${pair}.`);
+  } else {
+    cotizacionActual.items = cotizacionActual.items.filter(x => String(x.id) !== String(id));
+  }
+
   renderCotizacion();
 }
 
@@ -2780,22 +3126,32 @@ function confirmarAgregarProducto(){
 }
 
 function addItem(codigo, qty, priceType, customPrice){
-  const newItem = {
-    id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
-    codigo,
-    qty: Number(qty || 1),
-    priceType,
-    customPrice: Number(customPrice || 0)
-  };
+  if (!cotizacionActual || !Array.isArray(cotizacionActual.items)) return null;
 
-  const key = itemKey(newItem);
-  const exist = cotizacionActual.items.find(it => itemKey(it) === key);
+  const c = normCode(codigo);
+  const q = Math.max(1, Number(qty || 1));
+  const p = String(priceType || "precio");
+  const cp = Number(customPrice || 0);
 
-  if (exist) {
-    exist.qty += newItem.qty;
+  // Agregar / acumular el producto principal
+  let main = findMatchingItem(c, p, cp);
+  if (main) {
+    main.qty = Math.max(1, Number(main.qty || 1)) + q;
   } else {
-    cotizacionActual.items.push(newItem);
+    main = {
+      id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
+      codigo: c,
+      qty: q,
+      priceType: p,
+      customPrice: cp
+    };
+    cotizacionActual.items.push(main);
   }
+
+  // Si el código está vinculado, asegurar que el par exista y quede con la misma cantidad
+  syncLinkedPairForItem(main);
+
+  return main;
 }
 
 /* ================= GUARDAR COTIZACIÓN ================= */
