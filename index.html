@@ -555,38 +555,84 @@
 </div>
 
 <!-- ================= MODAL: AJUSTES ================= -->
-<div id="modalSettings" class="modal">
-  <div class="modal-card">
-    <h3>Ajustes</h3>
-    <p class="muted" id="settingsInfo">Opciones del dispositivo.</p>
-
-    <div class="card-lite">
-      <div class="label">Tema</div>
-      <button type="button" id="themeToggleBtn" class="secondary" onclick="toggleTheme()">🌙 Cambiar tema</button>
-      <div class="muted" id="themeHint">Se guarda en este dispositivo.</div>
+<div id="modalSettings" class="modal" onclick="if(event.target===this) closeModal('modalSettings')">
+  <div class="modal-card settings-modal">
+    <div class="settings-header">
+      <div class="settings-title">Ajustes</div>
+      <button type="button" class="icon-x" onclick="closeModal('modalSettings')" aria-label="Cerrar">✕</button>
     </div>
 
-    <div class="card-lite">
-      <div class="label">Respaldo</div>
-      <button type="button" onclick="exportBackup()">💾 Exportar respaldo</button>
-      <input type="file" id="backupFile" class="hidden" accept="application/json" onchange="importBackupFromFile(this.files[0]); this.value=''" />
-      <button type="button" class="secondary" onclick="triggerBackupImport()">📥 Importar respaldo</button>
-      <div class="muted">Incluye clientes, cotizaciones, movimientos y ajustes locales.</div>
-    </div>
+    <div class="settings-body">
+      <div class="settings-badges" aria-label="Estado">
+        <span class="badge" id="badgeRole">Rol: —</span>
+        <span class="badge" id="badgeConn">Conexión: —</span>
+        <span class="badge" id="badgeSync">Sync: —</span>
+      </div>
 
-    <div class="card-lite">
-      <div class="label">Datos locales</div>
-      <button type="button" class="danger" onclick="clearLocalData()">🗑️ Limpiar datos locales</button>
-      <div class="muted">Borra datos guardados en este teléfono.</div>
-    </div>
+      <div class="settings-section">
+        <div class="settings-row">
+          <div class="row-left">
+            <div class="row-title">Tema</div>
+            <div class="muted small" id="themeHint">—</div>
+          </div>
+          <label class="switch" aria-label="Cambiar tema">
+            <input type="checkbox" id="themeSwitch" onchange="setThemeFromSwitch(this.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
 
-    <div class="btn-row">
-      <button type="button" class="secondary" onclick="closeModal('modalSettings')">Cerrar</button>
+      <div class="settings-section">
+        <div class="settings-row">
+          <div class="row-left">
+            <div class="row-title">Inventario</div>
+            <div class="muted small" id="invCacheInfo">—</div>
+          </div>
+        </div>
+        <div class="btn-row compact">
+          <button type="button" class="clean" onclick="refreshInventoryNow()">🔄 Actualizar</button>
+          <button type="button" class="clean secondary" onclick="clearInventoryCache()">🧹 Borrar caché</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-row">
+          <div class="row-left">
+            <div class="row-title">Respaldo</div>
+            <div class="muted small">Exporta o importa tus datos.</div>
+          </div>
+        </div>
+        <div class="btn-row compact">
+          <button type="button" class="clean" onclick="exportBackup()">💾 Exportar</button>
+          <input type="file" id="backupFile" class="hidden" accept="application/json" onchange="importBackupFromFile(this.files[0]); this.value=''" />
+          <button type="button" class="clean secondary" onclick="triggerBackupImport()">📥 Importar</button>
+        </div>
+        <details class="help">
+          <summary>¿Qué incluye?</summary>
+          <div class="muted small">Incluye clientes, cotizaciones, movimientos y ajustes locales.</div>
+        </details>
+      </div>
+
+      <div class="settings-section danger-surface">
+        <div class="settings-row">
+          <div class="row-left">
+            <div class="row-title">Datos locales</div>
+            <div class="muted small">Borra lo guardado en este teléfono.</div>
+          </div>
+        </div>
+        <button type="button" class="clean danger" onclick="clearLocalData()">🗑️ Limpiar datos</button>
+      </div>
+
+      <details class="settings-more">
+        <summary>Detalles</summary>
+        <div class="muted small" id="settingsInfo">—</div>
+      </details>
     </div>
   </div>
 </div>
 
 <!-- ================= MODAL: CALCULADORA ================= -->
+
 <div id="modalCalc" class="modal">
   <div class="modal-card">
     <h3>🧮 Calculadora</h3>
