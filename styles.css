@@ -67,8 +67,14 @@ button.small{
 .btn-row{
   display:flex;
   gap:10px;
+  flex-wrap:wrap; /* evita overflow en pantallas angostas */
 }
-.btn-row button{ margin-bottom:0; }
+.btn-row button{
+  margin-bottom:0;
+  width:auto;            /* anula el width:100% base */
+  min-width:0;
+  flex:1 1 160px;        /* permite que se acomoden en 1 o 2 columnas según espacio */
+}
 
 input, select{
   width:100%;
@@ -205,6 +211,26 @@ main{ padding:12px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)
   padding:20px;
   border-radius:18px;
   box-shadow:0 14px 40px rgba(0,0,0,.35);
+  /* En pantallas pequeñas, el contenido puede ser más alto que el viewport.
+     Esto permite que el modal sea scrolleable sin desbordarse. */
+  max-height: calc(100vh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - var(--safe-bottom));
+  overflow:auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@supports (height: 100dvh){
+  .modal-card{
+    max-height: calc(100dvh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - var(--safe-bottom));
+  }
+}
+
+/* Ajustes extra para pantallas angostas */
+@media (max-width: 380px){
+  .modal{ padding: calc(12px + env(safe-area-inset-top, 0px)) 12px calc(12px + env(safe-area-inset-bottom, 0px) + var(--safe-bottom)); }
+  .modal-card{ padding:16px; border-radius:16px; max-width:380px; }
+  #modalSettings .card-lite{ padding:10px; }
+  #modalSettings .btn-row{ flex-direction:column; }
+  #modalSettings .btn-row button{ flex:0 0 auto; width:100%; }
 }
 
 /* ---------- Inputs con botón (ej: calculadora) ---------- */
@@ -1068,3 +1094,184 @@ button.list-item{
   text-align:center;
 }
 .toast.show{ opacity:1; transform: translateX(-50%) translateY(0); }
+/* ---------- Ajustes: modal compacto y limpio ---------- */
+#modalSettings .modal-card.settings-modal{
+  max-width:360px;
+  padding:0;
+  border-radius:16px;
+  overflow:hidden; /* scroll interno */
+}
+
+#modalSettings .settings-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:14px 14px 12px;
+  border-bottom:1px solid var(--borde);
+  background:var(--panel);
+}
+
+#modalSettings .settings-title{
+  font-size:16px;
+  font-weight:950;
+  letter-spacing:.2px;
+}
+
+#modalSettings button.icon-x{
+  width:36px;
+  height:36px;
+  padding:0;
+  margin:0;
+  border-radius:12px;
+  background:var(--btn-secondary-bg);
+  color:var(--btn-secondary-fg);
+}
+
+#modalSettings .settings-body{
+  padding:14px;
+  overflow:auto;
+  -webkit-overflow-scrolling:touch;
+  max-height: calc(78vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - var(--safe-bottom));
+  max-height: min(520px, calc(78vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - var(--safe-bottom)));
+}
+
+@supports (height: 100dvh){
+  #modalSettings .settings-body{
+    max-height: calc(78dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - var(--safe-bottom));
+    max-height: min(520px, calc(78dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - var(--safe-bottom)));
+  }
+}
+
+#modalSettings .muted{ margin-top:0; }
+#modalSettings .muted.small{ font-size:12px; }
+
+#modalSettings .settings-badges{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-bottom:12px;
+}
+
+#modalSettings .badge{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 10px;
+  border-radius:999px;
+  border:1px solid var(--borde);
+  background:var(--panel-2);
+  font-size:12px;
+  font-weight:900;
+  color:var(--texto);
+}
+
+#modalSettings .settings-section{
+  background:var(--panel);
+  border:1px solid var(--borde);
+  border-radius:14px;
+  padding:12px;
+  margin-bottom:10px;
+}
+
+#modalSettings .settings-section.danger-surface{
+  border-color: rgba(185,28,28,.55);
+}
+
+#modalSettings .settings-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:10px;
+}
+
+#modalSettings .row-left{ min-width:0; }
+#modalSettings .row-title{
+  font-weight:950;
+  font-size:14px;
+  margin-bottom:4px;
+}
+
+#modalSettings .btn-row.compact{
+  gap:8px;
+}
+
+#modalSettings button.clean{
+  padding:11px 12px;
+  border-radius:12px;
+  font-size:14px;
+  font-weight:950;
+  margin:0;
+}
+
+#modalSettings .btn-row.compact button{
+  flex:1 1 140px;
+}
+
+/* Switch (tema) */
+#modalSettings .switch{
+  position:relative;
+  display:inline-block;
+  width:46px;
+  height:26px;
+  flex:0 0 auto;
+}
+#modalSettings .switch input{ opacity:0; width:0; height:0; }
+#modalSettings .slider{
+  position:absolute;
+  inset:0;
+  cursor:pointer;
+  background:var(--btn-secondary-bg);
+  border:1px solid var(--borde);
+  border-radius:999px;
+  transition: .15s;
+}
+#modalSettings .slider:before{
+  content:"";
+  position:absolute;
+  height:20px;
+  width:20px;
+  left:3px;
+  top:50%;
+  transform: translateY(-50%);
+  background:#fff;
+  border-radius:999px;
+  transition: .15s;
+}
+#modalSettings .switch input:checked + .slider{
+  background:var(--naranja);
+  border-color: rgba(0,0,0,.0);
+}
+#modalSettings .switch input:checked + .slider:before{
+  transform: translate(20px, -50%);
+}
+
+/* Details / ayuda */
+#modalSettings details.help,
+#modalSettings details.settings-more{
+  border:1px solid var(--borde);
+  border-radius:12px;
+  padding:10px 12px;
+  background:rgba(0,0,0,.06);
+  margin-top:10px;
+}
+#modalSettings details.help summary,
+#modalSettings details.settings-more summary{
+  cursor:pointer;
+  font-weight:900;
+  font-size:13px;
+  color:var(--texto);
+}
+#modalSettings details.help[open] summary,
+#modalSettings details.settings-more[open] summary{
+  margin-bottom:8px;
+}
+
+@media (max-width: 360px){
+  #modalSettings .modal-card.settings-modal{ max-width: 92vw; }
+  #modalSettings .settings-body{ padding:12px; }
+  #modalSettings .settings-section{ padding:10px; }
+  #modalSettings .btn-row.compact{ flex-direction:column; }
+  #modalSettings .btn-row.compact button{ width:100%; flex:0 0 auto; }
+}
