@@ -8,7 +8,6 @@ const URLS = {
   preciosadmin: BASE_RAW + "preciosadmin.json",
   motoristas: BASE_RAW + "motoristas.json",
   placas: BASE_RAW + "placas.json",
-  alias: BASE_RAW + "Alias.json",
   version: BASE_RAW + "inventario_version.json"
 };
 
@@ -400,7 +399,7 @@ function updateSettingsInfo(){
   let v = "";
   try { v = String(localStorage.getItem("inventarioVersion") || "0"); } catch {}
 
-  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin, URLS.alias];
+  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin];
   const lastSync = Math.max(0, ...invUrls.map(u => __getLastSyncTsForUrl(u)));
 
   const online = (typeof navigator !== "undefined" && "onLine" in navigator)
@@ -1491,10 +1490,6 @@ let cotizaciones = JSON.parse(localStorage.getItem("cotizaciones") || "[]");
 
 let catalogo = [];
 let catalogoMap = new Map();
-
-let aliasDb = null;              // objeto como viene de Alias.json
-let aliasToCodigo = new Map();   // "7425..." -> "07-0311"
-let aliasCargado = false;
 let catalogoCargado = false;
 
 let cotizacionActual = null;
@@ -1740,32 +1735,12 @@ async function ensureCatalogoCargado(forceRefresh = false){
 
   await checkVersionAndReload();
 
-  const [invP, invA, invT, preciosadmin, aliasJson] = await Promise.all([
+  const [invP, invA, invT, preciosadmin] = await Promise.all([
     fetchJson(URLS.invP),
     fetchJson(URLS.invA),
     fetchJson(URLS.invT),
-    fetchJson(URLS.preciosadmin),
-    // Alias (código de barras -> código interno). Si falla, seguimos sin bloquear.
-    fetchJson(URLS.alias).catch(() => ({}))
+    fetchJson(URLS.preciosadmin)
   ]);
-
-  // construir índice rápido alias -> código
-  try {
-    aliasDb = (aliasJson && typeof aliasJson === "object") ? aliasJson : null;
-    aliasToCodigo = new Map();
-    if (aliasDb) {
-      for (const cod of Object.keys(aliasDb)) {
-        const al = String(aliasDb?.[cod]?.ALIAS || "").trim();
-        if (al) aliasToCodigo.set(al, cod);
-      }
-    }
-    aliasCargado = true;
-  } catch {
-    aliasDb = null;
-    aliasToCodigo = new Map();
-    aliasCargado = false;
-  }
-
 
   // ✅ aplicar cambios locales de ADMIN (si existen)
   const preciosLocal = JSON.parse(localStorage.getItem("preciosModificadosAdmin") || "{}");
@@ -1834,7 +1809,7 @@ async function ensureCatalogoCargado(forceRefresh = false){
 
 // === Acciones de Ajustes: sincronizar y limpiar caché ===
 function __getInvGroupLastSync(){
-  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin, URLS.alias];
+  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin];
   return Math.max(0, ...invUrls.map(u => __getLastSyncTsForUrl(u)));
 }
 
@@ -1859,7 +1834,7 @@ async function refreshInventoryNow(){
 }
 
 async function clearInventoryCache(){
-  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin, URLS.alias];
+  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin];
   for (const u of invUrls) {
     try { await __cacheDelete(u); } catch {}
   }
@@ -5422,368 +5397,13 @@ function cerrarModalAddMovItem(){
   closeModal("modalAddMovItem");
 }
 
-
-/* ================= ESCÁNER CÓDIGO DE BARRAS (CONTEO) ================= */
-let __barcodeStream = null;
-let __barcodeDetector = null;
-let __barcodeTimer = null;
-let __barcodeFacingMode = "environment";
-let __barcodeLocked = false;
-let __barcodeTargetInputId = "addMovCodigo";
-
-function __barcodeSetStatus(msg, asHtml = false){
-  const status = el("barcodeStatus");
-  if (!status) return;
-  if (asHtml) status.innerHTML = msg;
-  else status.textContent = msg;
-}
-
-function __barcodeShowPhotoFallback(show, msgHtml = ""){
-  const photoBtn = el("barcodePhotoBtn");
-  const fileInput = el("barcodeFileInput");
-
-  // El input puede quedarse oculto; lo abrimos con .click()
-  if (fileInput) fileInput.classList.add("hidden");
-  if (photoBtn) photoBtn.style.display = show ? "inline-flex" : "none";
-
-  if (show) {
-    if (msgHtml) __barcodeSetStatus(msgHtml, true);
-    else __barcodeSetStatus("Tu navegador/WebView no permite la cámara en vivo. Usa “Tomar foto” o escribe el código manualmente.");
-  }
-}
-
-function openBarcodePhotoCapture(){
-  const fileInput = el("barcodeFileInput");
-  if (fileInput) fileInput.click();
-}
-
-async function onBarcodePhotoSelected(file){
-  if (!file) return;
-
-  // Asegurar que no quede una cámara abierta
-  stopBarcodeScanner(true);
-
-  __barcodeSetStatus("Procesando imagen...", false);
-
-  if (!("BarcodeDetector" in window)) {
-    __barcodeSetStatus("Tu navegador no soporta BarcodeDetector. Escribe el código manualmente.", false);
-    return;
-  }
-
-  let source = null;
-  let objectUrl = null;
-
-  try {
-    // 1) Intentar con createImageBitmap (más rápido y exacto)
-    if (typeof createImageBitmap === "function") {
-      try { source = await createImageBitmap(file); } catch {}
-    }
-
-    // 2) Fallback: HTMLImageElement
-    if (!source) {
-      objectUrl = URL.createObjectURL(file);
-      source = await new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error("No se pudo leer la imagen"));
-        img.src = objectUrl;
-      });
-    }
-
-    let formats = ["ean_13", "ean_8", "code_128", "upc_a", "upc_e"];
-    try {
-      if (typeof BarcodeDetector.getSupportedFormats === "function") {
-        const supported = await BarcodeDetector.getSupportedFormats();
-        if (Array.isArray(supported) && supported.length) {
-          const filtered = formats.filter(f => supported.includes(f));
-          formats = filtered.length ? filtered : supported;
-        }
-      }
-    } catch {}
-
-    const det = new BarcodeDetector({ formats });
-    const codes = await det.detect(source);
-
-    if (codes && codes.length) {
-      const raw = String(codes[0].rawValue || codes[0].value || "").trim();
-      if (raw) {
-        __onBarcodeDetected(raw);
-        return;
-      }
-    }
-
-    __barcodeSetStatus("No se detectó el código en la foto. Intenta acercarte, con buena luz, y vuelve a tomarla.", false);
-  } catch (err) {
-    console.warn("Barcode photo scan error:", err);
-    __barcodeSetStatus("No se pudo leer la foto. Intenta de nuevo.", false);
-  } finally {
-    try { if (objectUrl) URL.revokeObjectURL(objectUrl); } catch {}
-  }
-}
-
-function __barcodeHasGetUserMedia(){
-  const md = navigator.mediaDevices;
-  return !!(md && typeof md.getUserMedia === "function") ||
-         typeof navigator.getUserMedia === "function" ||
-         typeof navigator.webkitGetUserMedia === "function" ||
-         typeof navigator.mozGetUserMedia === "function";
-}
-
-function __barcodeGetUserMedia(constraints){
-  const md = navigator.mediaDevices;
-  if (md && typeof md.getUserMedia === "function") {
-    return md.getUserMedia(constraints);
-  }
-  const legacy = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
-  if (!legacy) return Promise.reject(new Error("getUserMedia no soportado"));
-  return new Promise((resolve, reject) => legacy.call(navigator, constraints, resolve, reject));
-}
-
-function __barcodeExplainGumError(err){
-  const name = (err && (err.name || err.code || err.message)) ? String(err.name || err.code || err.message) : "";
-
-  // Mensajes comunes (nombres varían según navegador)
-  if (/NotAllowedError|PermissionDeniedError/i.test(name)) {
-    return "Permiso denegado para usar la cámara. En Android: Ajustes → Apps → Permisos → <b>Cámara</b> (permitir).<br/>Mientras tanto usa <b>Tomar foto</b>.";
-  }
-  if (/NotFoundError|DevicesNotFoundError/i.test(name)) {
-    return "No se encontró una cámara disponible en este dispositivo. Puedes usar <b>Tomar foto</b> o escribir el código manualmente.";
-  }
-  if (/NotReadableError|TrackStartError/i.test(name)) {
-    return "La cámara está ocupada por otra app (o falló al iniciar). Cierra otras apps que usen cámara y vuelve a intentar. También puedes usar <b>Tomar foto</b>.";
-  }
-  if (/OverconstrainedError/i.test(name)) {
-    return "No fue posible usar la cámara solicitada. Prueba con “Cambiar cámara” o usa <b>Tomar foto</b>.";
-  }
-  if (/SecurityError|NotSecure/i.test(name)) {
-    return "La cámara fue bloqueada por seguridad. Para cámara en vivo necesitas abrir la app en <b>HTTPS</b>. También puedes usar <b>Tomar foto</b>.";
-  }
-  return "No se pudo abrir la cámara. Revisa permisos. También puedes usar <b>Tomar foto</b>.";
-}
-
-function abrirScannerCodigoBarrasAddMov(){
-  __barcodeTargetInputId = "addMovCodigo";
-
-  // Asegurar catálogo/alias cargado para poder resolver el código de barras.
-  try { ensureCatalogoCargado(false); } catch {}
-
-  openModal("modalBarcodeScanner");
-  startBarcodeScanner();
-}
-
-function cerrarScannerCodigoBarras(){
-  stopBarcodeScanner();
-  closeModal("modalBarcodeScanner");
-}
-
-function flipBarcodeCamera(){
-  __barcodeFacingMode = (__barcodeFacingMode === "environment") ? "user" : "environment";
-  stopBarcodeScanner(true);
-  startBarcodeScanner();
-}
-
-async function startBarcodeScanner(){
-  const video = el("barcodeVideo");
-  const flipBtn = el("barcodeFlipBtn");
-
-  __barcodeLocked = false;
-  __barcodeShowPhotoFallback(false);
-
-  if (!video) {
-    __barcodeSetStatus("No se encontró el visor de cámara.", false);
-    return;
-  }
-
-  // Autoplay en móviles: mejor forzar muted
-  try { video.muted = true; } catch {}
-  try { video.setAttribute("muted", ""); } catch {}
-  try { video.setAttribute("playsinline", ""); } catch {}
-  try { video.playsInline = true; } catch {}
-
-  // Si el contexto no es seguro (http/file), muchos navegadores ocultan o bloquean cámara
-  if (!window.isSecureContext) {
-    const proto = (location && location.protocol) ? location.protocol : "";
-    __barcodeShowPhotoFallback(true,
-      `Para usar cámara en vivo necesitas abrir la app en <b>HTTPS</b> (no ${proto || "inseguro"}).<br/>Usa <b>Tomar foto</b> o abre la web en una URL https://.`
-    );
-    return;
-  }
-
-  if (!__barcodeHasGetUserMedia()) {
-    __barcodeShowPhotoFallback(true,
-      "Este navegador/WebView no expone la API de cámara (<b>getUserMedia</b>).<br/>Usa <b>Tomar foto</b> o escribe el código manualmente."
-    );
-    return;
-  }
-
-  __barcodeSetStatus("Abriendo cámara...", false);
-
-  // Intentos progresivos de constraints (para compatibilidad)
-  const tries = [
-    { video: { facingMode: { ideal: __barcodeFacingMode }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
-    { video: { facingMode: { ideal: __barcodeFacingMode } }, audio: false },
-    { video: true, audio: false }
-  ];
-
-  try {
-    let stream = null;
-    let lastErr = null;
-
-    for (const c of tries) {
-      try {
-        stream = await __barcodeGetUserMedia(c);
-        break;
-      } catch (e) {
-        lastErr = e;
-      }
-    }
-
-    if (!stream) {
-      console.warn("Barcode getUserMedia error:", lastErr);
-      __barcodeShowPhotoFallback(true, __barcodeExplainGumError(lastErr));
-      return;
-    }
-
-    __barcodeStream = stream;
-
-    video.srcObject = __barcodeStream;
-
-    try { await video.play(); } catch {}
-
-    // Mostrar botón "cambiar cámara" si hay más de una
-    if (flipBtn) {
-      try {
-        const devs = await navigator.mediaDevices.enumerateDevices();
-        const cams = (devs || []).filter(d => d.kind === "videoinput");
-        flipBtn.style.display = (cams.length > 1) ? "inline-flex" : "none";
-      } catch {
-        flipBtn.style.display = "none";
-      }
-    }
-
-    if ("BarcodeDetector" in window) {
-      let formats = ["ean_13", "ean_8", "code_128", "upc_a", "upc_e"];
-      try {
-        if (typeof BarcodeDetector.getSupportedFormats === "function") {
-          const supported = await BarcodeDetector.getSupportedFormats();
-          if (Array.isArray(supported) && supported.length) {
-            const filtered = formats.filter(f => supported.includes(f));
-            formats = filtered.length ? filtered : supported;
-          }
-        }
-      } catch {}
-
-      __barcodeDetector = new BarcodeDetector({ formats });
-
-      __barcodeSetStatus("Escaneando...", false);
-
-      __barcodeTimer = setInterval(async () => {
-        if (__barcodeLocked) return;
-        try {
-          const codes = await __barcodeDetector.detect(video);
-          if (codes && codes.length) {
-            const raw = String(codes[0].rawValue || codes[0].value || "").trim();
-            if (raw) __onBarcodeDetected(raw);
-          }
-        } catch {}
-      }, 220);
-    } else {
-      __barcodeShowPhotoFallback(true,
-        "Tu navegador no soporta <b>BarcodeDetector</b> para escaneo en vivo.<br/>Usa <b>Tomar foto</b> o escribe el código manualmente."
-      );
-    }
-  } catch (err) {
-    console.warn("Barcode scanner error:", err);
-    __barcodeShowPhotoFallback(true, __barcodeExplainGumError(err));
-  }
-}
-
-function stopBarcodeScanner(keepModalOpen = false){
-  if (__barcodeTimer) { try { clearInterval(__barcodeTimer); } catch {} __barcodeTimer = null; }
-  __barcodeDetector = null;
-
-  const video = el("barcodeVideo");
-  if (video) {
-    try { video.pause(); } catch {}
-    try { video.srcObject = null; } catch {}
-  }
-
-  if (__barcodeStream) {
-    try { __barcodeStream.getTracks().forEach(t => { try { t.stop(); } catch {} }); } catch {}
-    __barcodeStream = null;
-  }
-
-  if (keepModalOpen) __barcodeSetStatus("Cambiando cámara...", false);
-}
-
-function __onBarcodeDetected(raw){
-  if (__barcodeLocked) return;
-  __barcodeLocked = true;
-
-  stopBarcodeScanner();
-  closeModal("modalBarcodeScanner");
-
-  const digits = String(raw || "").trim().replace(/\D/g, "");
-  let codigo = null;
-
-  // 1) buscar alias exacto (solo dígitos)
-  if (digits && aliasToCodigo && aliasToCodigo.size) {
-    codigo = aliasToCodigo.get(digits) || null;
-  }
-
-  // 2) fallback: por si el lector devuelve algo no numérico
-  if (!codigo && raw && aliasToCodigo && aliasToCodigo.size) {
-    const s = String(raw || "").trim();
-    if (aliasToCodigo.has(s)) codigo = aliasToCodigo.get(s) || null;
-  }
-
-  const codeEl = el(__barcodeTargetInputId);
-  if (!codeEl) return;
-
-  if (codigo) {
-    codeEl.value = codigo;
-    try { onAddMovCodigoInput(codigo); } catch {}
-    try { showToast("Código detectado ✅"); } catch {}
-    setTimeout(() => el("addMovQty")?.focus(), 80);
-    return;
-  }
-
-  // no encontrado en Alias.json
-  codeEl.value = digits || String(raw || "").trim();
-  try { onAddMovCodigoInput(codeEl.value); } catch {}
-  try { showToast("No se encontró en Alias.json"); } catch {}
-}
-
-
 function abrirBusquedaProductoParaAddMov(){
   // Reutiliza el modal existente de búsqueda por nombre/código
   abrirModalProductosOperador("__ADD__", addMovTipo);
 }
 
 function onAddMovCodigoInput(val){
-  let v = String(val || "").trim();
-
-  // Si el usuario/escáner ingresa SOLO dígitos, lo tratamos como posible código de barras.
-  // Si existe en Alias.json, lo convertimos al código interno (ej: "07-0311").
-  const digits = v.replace(/\D/g, "");
-  const isBarcode = digits && (v === digits) && digits.length >= 8;
-
-  if (isBarcode && aliasToCodigo && aliasToCodigo.size) {
-    const cod = aliasToCodigo.get(digits);
-    if (cod) {
-      v = cod;
-    } else {
-      // No hay mapeo en Alias.json: dejamos el valor tal cual (sin auto-guion)
-      const codeEl = el("addMovCodigo");
-      const prodEl = el("addMovProducto");
-      if (codeEl && codeEl.value !== digits) codeEl.value = digits;
-      if (prodEl) prodEl.value = "";
-      updateSugerenciasAddMov();
-      return;
-    }
-  }
-
-  const formatted = formatCodigoAutoGuion(v);
+  const formatted = formatCodigoAutoGuion(val);
 
   const codeEl = el("addMovCodigo");
   const prodEl = el("addMovProducto");
