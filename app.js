@@ -8,6 +8,7 @@ const URLS = {
   preciosadmin: BASE_RAW + "preciosadmin.json",
   motoristas: BASE_RAW + "motoristas.json",
   placas: BASE_RAW + "placas.json",
+  alias: BASE_RAW + "Alias.json",
   version: BASE_RAW + "inventario_version.json"
 };
 
@@ -399,7 +400,7 @@ function updateSettingsInfo(){
   let v = "";
   try { v = String(localStorage.getItem("inventarioVersion") || "0"); } catch {}
 
-  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin];
+  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin, URLS.alias];
   const lastSync = Math.max(0, ...invUrls.map(u => __getLastSyncTsForUrl(u)));
 
   const online = (typeof navigator !== "undefined" && "onLine" in navigator)
@@ -1490,6 +1491,10 @@ let cotizaciones = JSON.parse(localStorage.getItem("cotizaciones") || "[]");
 
 let catalogo = [];
 let catalogoMap = new Map();
+
+let aliasDb = null;              // objeto como viene de Alias.json
+let aliasToCodigo = new Map();   // "7425..." -> "07-0311"
+let aliasCargado = false;
 let catalogoCargado = false;
 
 let cotizacionActual = null;
@@ -1735,12 +1740,32 @@ async function ensureCatalogoCargado(forceRefresh = false){
 
   await checkVersionAndReload();
 
-  const [invP, invA, invT, preciosadmin] = await Promise.all([
+  const [invP, invA, invT, preciosadmin, aliasJson] = await Promise.all([
     fetchJson(URLS.invP),
     fetchJson(URLS.invA),
     fetchJson(URLS.invT),
-    fetchJson(URLS.preciosadmin)
+    fetchJson(URLS.preciosadmin),
+    // Alias (código de barras -> código interno). Si falla, seguimos sin bloquear.
+    fetchJson(URLS.alias).catch(() => ({}))
   ]);
+
+  // construir índice rápido alias -> código
+  try {
+    aliasDb = (aliasJson && typeof aliasJson === "object") ? aliasJson : null;
+    aliasToCodigo = new Map();
+    if (aliasDb) {
+      for (const cod of Object.keys(aliasDb)) {
+        const al = String(aliasDb?.[cod]?.ALIAS || "").trim();
+        if (al) aliasToCodigo.set(al, cod);
+      }
+    }
+    aliasCargado = true;
+  } catch {
+    aliasDb = null;
+    aliasToCodigo = new Map();
+    aliasCargado = false;
+  }
+
 
   // ✅ aplicar cambios locales de ADMIN (si existen)
   const preciosLocal = JSON.parse(localStorage.getItem("preciosModificadosAdmin") || "{}");
@@ -1809,7 +1834,7 @@ async function ensureCatalogoCargado(forceRefresh = false){
 
 // === Acciones de Ajustes: sincronizar y limpiar caché ===
 function __getInvGroupLastSync(){
-  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin];
+  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin, URLS.alias];
   return Math.max(0, ...invUrls.map(u => __getLastSyncTsForUrl(u)));
 }
 
@@ -1834,7 +1859,7 @@ async function refreshInventoryNow(){
 }
 
 async function clearInventoryCache(){
-  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin];
+  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin, URLS.alias];
   for (const u of invUrls) {
     try { await __cacheDelete(u); } catch {}
   }
@@ -5397,13 +5422,190 @@ function cerrarModalAddMovItem(){
   closeModal("modalAddMovItem");
 }
 
+
+/* ================= ESCÁNER CÓDIGO DE BARRAS (CONTEO) ================= */
+let __barcodeStream = null;
+let __barcodeDetector = null;
+let __barcodeTimer = null;
+let __barcodeFacingMode = "environment";
+let __barcodeLocked = false;
+let __barcodeTargetInputId = "addMovCodigo";
+
+function abrirScannerCodigoBarrasAddMov(){
+  __barcodeTargetInputId = "addMovCodigo";
+
+  // Asegurar catálogo/alias cargado para poder resolver el código de barras.
+  try { ensureCatalogoCargado(false); } catch {}
+
+  openModal("modalBarcodeScanner");
+  startBarcodeScanner();
+}
+
+function cerrarScannerCodigoBarras(){
+  stopBarcodeScanner();
+  closeModal("modalBarcodeScanner");
+}
+
+function flipBarcodeCamera(){
+  __barcodeFacingMode = (__barcodeFacingMode === "environment") ? "user" : "environment";
+  stopBarcodeScanner(true);
+  startBarcodeScanner();
+}
+
+async function startBarcodeScanner(){
+  const video = el("barcodeVideo");
+  const status = el("barcodeStatus");
+  const flipBtn = el("barcodeFlipBtn");
+
+  __barcodeLocked = false;
+
+  if (!video || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    if (status) status.textContent = "Este dispositivo/navegador no soporta cámara (getUserMedia).";
+    return;
+  }
+
+  if (status) status.textContent = "Abriendo cámara...";
+
+  try {
+    const constraints = { video: { facingMode: __barcodeFacingMode }, audio: false };
+    __barcodeStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+    video.srcObject = __barcodeStream;
+    await video.play();
+
+    // Mostrar botón "cambiar cámara" si hay más de una
+    if (flipBtn) {
+      try {
+        const devs = await navigator.mediaDevices.enumerateDevices();
+        const cams = (devs || []).filter(d => d.kind === "videoinput");
+        flipBtn.style.display = (cams.length > 1) ? "inline-flex" : "none";
+      } catch {
+        flipBtn.style.display = "none";
+      }
+    }
+
+    if ("BarcodeDetector" in window) {
+      let formats = ["ean_13", "ean_8", "code_128", "upc_a", "upc_e"];
+      try {
+        if (typeof BarcodeDetector.getSupportedFormats === "function") {
+          const supported = await BarcodeDetector.getSupportedFormats();
+          if (Array.isArray(supported) && supported.length) {
+            const filtered = formats.filter(f => supported.includes(f));
+            formats = filtered.length ? filtered : supported;
+          }
+        }
+      } catch {}
+
+      __barcodeDetector = new BarcodeDetector({ formats });
+
+      if (status) status.textContent = "Escaneando...";
+
+      __barcodeTimer = setInterval(async () => {
+        if (__barcodeLocked) return;
+        try {
+          if (video.readyState < 2) return;
+          const codes = await __barcodeDetector.detect(video);
+          if (codes && codes.length) {
+            const raw = String(codes[0].rawValue || codes[0].value || "").trim();
+            if (raw) __onBarcodeDetected(raw);
+          }
+        } catch {}
+      }, 220);
+    } else {
+      if (status) status.innerHTML = "Tu navegador no soporta <b>BarcodeDetector</b>. Usa Chrome/Android o escribe el código manualmente.";
+    }
+  } catch (err) {
+    console.warn("Barcode scanner error:", err);
+    if (status) status.textContent = "No se pudo abrir la cámara. Revisa permisos.";
+  }
+}
+
+function stopBarcodeScanner(keepModalOpen = false){
+  if (__barcodeTimer) { try { clearInterval(__barcodeTimer); } catch {} __barcodeTimer = null; }
+  __barcodeDetector = null;
+
+  const video = el("barcodeVideo");
+  if (video) {
+    try { video.pause(); } catch {}
+    try { video.srcObject = null; } catch {}
+  }
+
+  if (__barcodeStream) {
+    try { __barcodeStream.getTracks().forEach(t => { try { t.stop(); } catch {} }); } catch {}
+    __barcodeStream = null;
+  }
+
+  const status = el("barcodeStatus");
+  if (status && keepModalOpen) status.textContent = "Cambiando cámara...";
+}
+
+function __onBarcodeDetected(raw){
+  if (__barcodeLocked) return;
+  __barcodeLocked = true;
+
+  stopBarcodeScanner();
+  closeModal("modalBarcodeScanner");
+
+  const digits = String(raw || "").trim().replace(/\D/g, "");
+  let codigo = null;
+
+  // 1) buscar alias exacto (solo dígitos)
+  if (digits && aliasToCodigo && aliasToCodigo.size) {
+    codigo = aliasToCodigo.get(digits) || null;
+  }
+
+  // 2) fallback: por si el lector devuelve algo no numérico
+  if (!codigo && aliasToCodigo && aliasToCodigo.size) {
+    codigo = aliasToCodigo.get(String(raw || "").trim()) || null;
+  }
+
+  const inputId = __barcodeTargetInputId || "addMovCodigo";
+  const codeEl = el(inputId);
+  if (!codeEl) return;
+
+  if (codigo) {
+    codeEl.value = codigo;
+    try { onAddMovCodigoInput(codigo); } catch {}
+    try { showToast("Código detectado ✅"); } catch {}
+    setTimeout(() => el("addMovQty")?.focus(), 80);
+    return;
+  }
+
+  // no encontrado en Alias.json
+  codeEl.value = digits || String(raw || "").trim();
+  try { onAddMovCodigoInput(codeEl.value); } catch {}
+  try { showToast("No se encontró en Alias.json"); } catch {}
+}
+
 function abrirBusquedaProductoParaAddMov(){
   // Reutiliza el modal existente de búsqueda por nombre/código
   abrirModalProductosOperador("__ADD__", addMovTipo);
 }
 
 function onAddMovCodigoInput(val){
-  const formatted = formatCodigoAutoGuion(val);
+  let v = String(val || "").trim();
+
+  // Si el usuario/escáner ingresa SOLO dígitos, lo tratamos como posible código de barras.
+  // Si existe en Alias.json, lo convertimos al código interno (ej: "07-0311").
+  const digits = v.replace(/\D/g, "");
+  const isBarcode = digits && (v === digits) && digits.length >= 8;
+
+  if (isBarcode && aliasToCodigo && aliasToCodigo.size) {
+    const cod = aliasToCodigo.get(digits);
+    if (cod) {
+      v = cod;
+    } else {
+      // No hay mapeo en Alias.json: dejamos el valor tal cual (sin auto-guion)
+      const codeEl = el("addMovCodigo");
+      const prodEl = el("addMovProducto");
+      if (codeEl && codeEl.value !== digits) codeEl.value = digits;
+      if (prodEl) prodEl.value = "";
+      updateSugerenciasAddMov();
+      return;
+    }
+  }
+
+  const formatted = formatCodigoAutoGuion(v);
 
   const codeEl = el("addMovCodigo");
   const prodEl = el("addMovProducto");
