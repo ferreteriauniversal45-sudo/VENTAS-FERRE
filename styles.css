@@ -707,7 +707,7 @@ button.success{
 /* ===== Modal agregar producto (Entradas / Salidas) ===== */
 .addmov-grid{
   display:grid;
-  grid-template-columns: 1fr 44px;
+  grid-template-columns: 1fr 44px 44px;
   gap:8px;
   align-items:center;
 }
@@ -1274,4 +1274,40 @@ button.list-item{
   #modalSettings .settings-section{ padding:10px; }
   #modalSettings .btn-row.compact{ flex-direction:column; }
   #modalSettings .btn-row.compact button{ width:100%; flex:0 0 auto; }
+}
+
+/* ================= ESCÁNER CÓDIGO DE BARRAS ================= */
+.barcode-video-wrap{
+  position:relative;
+  width:100%;
+  height:260px;
+  background:#000;
+  border-radius:14px;
+  overflow:hidden;
+  border:1px solid var(--border);
+}
+#barcodeVideo{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+.barcode-overlay{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+}
+.barcode-overlay::before{
+  content:"";
+  position:absolute;
+  left:12%;
+  right:12%;
+  top:30%;
+  bottom:30%;
+  border:2px solid rgba(255,255,255,0.9);
+  border-radius:14px;
+  box-shadow:0 0 0 999px rgba(0,0,0,0.25);
+}
+.barcode-status{
+  margin-top:10px;
+  min-height:18px;
 }
