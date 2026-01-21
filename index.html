@@ -283,6 +283,7 @@
     <div class="addmov-grid">
       <input id="addMovCodigo" placeholder="12-0065lb" />
       <button type="button" class="op-icon-btn secondary" onclick="abrirBusquedaProductoParaAddMov()" title="Buscar">🔎</button>
+      <button type="button" class="op-icon-btn secondary" onclick="abrirScannerCodigoBarrasAddMov()" title="Escanear código de barras">📷</button>
     </div>
 
     <div id="addMovSug" class="op-sugs" style="padding:0; margin:-4px 0 10px;"></div>
@@ -302,6 +303,27 @@
   </div>
 </div>
 
+
+
+<!-- ================= MODAL: ESCANEAR CÓDIGO DE BARRAS ================= -->
+<div id="modalBarcodeScanner" class="modal">
+  <div class="modal-card">
+    <h3>Escanear código de barras</h3>
+    <p class="muted">Apunta la cámara al código. Si existe en <b>Alias.json</b>, se colocará automáticamente el código del producto.</p>
+
+    <div class="barcode-video-wrap">
+      <video id="barcodeVideo" autoplay playsinline></video>
+      <div class="barcode-overlay"></div>
+    </div>
+
+    <div id="barcodeStatus" class="barcode-status muted"></div>
+
+    <div class="btn-row">
+      <button id="barcodeFlipBtn" type="button" class="secondary" onclick="flipBarcodeCamera()" style="display:none;">🔄 Cambiar cámara</button>
+      <button type="button" class="secondary" onclick="cerrarScannerCodigoBarras()">Cerrar</button>
+    </div>
+  </div>
+</div>
 
 <!-- ================= MODAL: AGREGAR PRODUCTO (CANTIDAD + PRECIO) ================= -->
 <div id="modalAgregarProducto" class="modal">
