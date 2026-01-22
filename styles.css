@@ -893,6 +893,65 @@ details.op-group summary::-webkit-details-marker{
   margin-top:10px;
 }
 
+/* ===== OPERADOR: PENDIENTES DE SALIDA (resumen por motorista) ===== */
+.op-psd-table-wrap{
+  overflow-x:auto;
+  margin-top:10px;
+}
+
+.op-sum-table{
+  width:100%;
+  border-collapse:separate;
+  border-spacing:0;
+}
+
+.op-sum-table th,
+.op-sum-table td{
+  padding:10px;
+  border-bottom:1px solid var(--borde);
+  vertical-align:top;
+}
+
+.op-sum-table thead th{
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:.03em;
+  color:var(--gris);
+  background:var(--panel-2);
+}
+
+.op-sum-table td.code{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-weight:900;
+  white-space:nowrap;
+}
+
+.op-sum-table td.num{
+  text-align:right;
+  font-weight:900;
+  white-space:nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.op-sum-table tbody tr:last-child td{
+  border-bottom:none;
+}
+
+.op-sum-total td{
+  background:var(--panel-2);
+}
+
+/* Tabla dentro de cada factura (Pendientes de salida) */
+.op-sum-table.op-inv-table th,
+.op-sum-table.op-inv-table td{
+  padding:8px;
+}
+
+.op-sum-table.op-inv-table thead th{
+  font-size:11px;
+}
+
+
 /* ===== Pickers (Motoristas / Placas) ===== */
 .picker-row{
   display:flex;
@@ -987,6 +1046,50 @@ button.list-item{
   margin:0;
   font-size:15px;
 }
+
+/* HOME OPERADOR: meta del resumen */
+.op-section-head-col{
+  align-items:flex-start;
+}
+.op-home-meta{
+  margin-top:4px;
+  font-size:12px;
+}
+
+/* HOME/PSD: títulos dentro del group */
+.op-group-title{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+.op-group-name{
+  font-weight:950;
+}
+.op-group-sub{
+  font-size:12px;
+  color:var(--gris);
+  font-weight:800;
+}
+
+/* Mejoras visuales */
+details.op-group{
+  box-shadow:0 6px 18px rgba(0,0,0,.06);
+}
+details.op-group summary::after{
+  content:"▾";
+  color:var(--gris);
+  font-weight:900;
+  margin-left:10px;
+  display:inline-block;
+  transition: transform .18s ease;
+}
+details.op-group[open] summary::after{
+  transform: rotate(180deg);
+}
+.op-psd-sumcard{
+  box-shadow:0 6px 18px rgba(0,0,0,.06);
+}
+
 
 .op-mini{
   display:flex;
