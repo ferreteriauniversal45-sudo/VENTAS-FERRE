@@ -2505,7 +2505,7 @@ function renderOpHomePSD(list){
 
           ${renderOpPSDResumenProductosGrupo(g.items || [])}
 
-          <div id="${factBoxId}" class="hidden" style="margin-top:10px;">
+          <div id="${factBoxId}" class="hidden op-inv-grid" style="margin-top:10px;">
             ${g.items.map(p => renderOpHomePSDMini(p)).join("")}
           </div>
         </div>
@@ -2519,34 +2519,45 @@ function renderOpHomePSDMini(p){
   const totalShip = items.reduce((a,x)=> a + Number(x.cantidad || 0), 0);
   const totalPend = items.reduce((a,x)=> a + Number(x.pendiente || 0), 0);
 
-  const meta = [
-    p.facturaNo ? `Factura ${String(p.facturaNo)}` : "Factura",
-    p.placa ? `Placa ${String(p.placa)}` : "",
-    p.fecha ? `Fecha ${String(p.fecha)}` : ""
-  ].filter(Boolean).join(" • ");
+  const facturaNo = String(p.facturaNo || "").trim();
+  const fecha = String(p.fecha || "").trim();
+  const placa = String(p.placa || "").trim();
+  const guard = String(p.creadoEn || "").trim();
+  const lines = items.length;
 
-  const guard = p.creadoEn ? `Guardada: ${String(p.creadoEn)}` : "";
+  const title = facturaNo ? `Factura #${escapeHtml(facturaNo)}` : `Factura`;
 
   return `
-    <div class="ticket">
-      <div class="ticket-top">
-        <div>
-          <div class="ticket-title">${escapeHtml(meta)}</div>
-          ${guard ? `<div class="ticket-sub">${escapeHtml(guard)}</div>` : ``}
+    <div class="ticket ticket-invoice">
+      <div class="inv-head">
+        <div class="inv-main">
+          <div class="inv-no">${title}</div>
+
+          <div class="inv-meta">
+            ${fecha ? `<span>📅 ${escapeHtml(fecha)}</span>` : ``}
+            ${placa ? `<span>🚚 Placa ${escapeHtml(placa)}</span>` : ``}
+            <span>📦 ${lines} línea${lines===1 ? "" : "s"}</span>
+          </div>
+
+          ${guard ? `<div class="inv-sub">Guardada: ${escapeHtml(guard)}</div>` : ``}
         </div>
-        <div class="ticket-total">
-          Enviar: ${fmtQty(totalShip)}${Number(totalPend||0) > 0 ? ` • Pend.: ${fmtQty(totalPend)}` : ``}
+
+        <div class="inv-totals">
+          <div class="inv-totals-label">A enviar</div>
+          <div class="inv-totals-qty">${fmtQty(totalShip)}</div>
+          ${Number(totalPend||0) > 0 ? `<div class="inv-totals-pend">Pend.: ${fmtQty(totalPend)}</div>` : ``}
         </div>
       </div>
 
-      <div class="ticket-stocks">
-        <span class="pill pill-t">Líneas: ${items.length}</span>
-        ${p.motoristaNombre ? `<span class="pill pill-p">🚚 ${escapeHtml(p.motoristaNombre)}</span>` : `<span class="pill pill-a">Sin motorista</span>`}
+      <div class="inv-chips">
+        ${p.motoristaNombre
+          ? `<span class="chip chip-accent">🚚 ${escapeHtml(p.motoristaNombre)}</span>`
+          : `<span class="chip chip-muted">Sin motorista</span>`}
       </div>
 
       ${renderOpPSDItemsTable(items)}
 
-      <div class="btn-row" style="margin-top:10px;">
+      <div class="inv-actions btn-row">
         <button type="button" class="secondary small" onclick="abrirSalidasOperadorEditarPendiente('${escSq(p.id)}')">✏️ Editar</button>
         <button type="button" class="danger small" onclick="eliminarSalidaPendienteDespachoUI('${escSq(p.id)}')">🗑️ Eliminar</button>
         <button type="button" class="small" onclick="despacharSalidaPendienteDespachoUI('${escSq(p.id)}')">🚚 Despachar</button>
@@ -4365,7 +4376,17 @@ function aggregateOpPSDProductos(facturas){
   let totalPend = 0;
   let totalLines = 0;
 
+  // Mantener el orden de las facturas tal como llegan (para el desglose por factura)
+  const facturaOrder = [];
+  const seenFactura = new Set();
+
   (facturas || []).forEach(f => {
+    const fno = String(f?.facturaNo || "").trim() || "—";
+    if (!seenFactura.has(fno)) {
+      seenFactura.add(fno);
+      facturaOrder.push(fno);
+    }
+
     const its = Array.isArray(f.items) ? f.items : [];
     its.forEach(it => {
       totalLines++;
@@ -4374,7 +4395,7 @@ function aggregateOpPSDProductos(facturas){
       const key = (codigo || producto || "").toUpperCase() || ("__" + totalLines);
 
       if (!map[key]) {
-        map[key] = { codigo: codigo || "—", producto: producto || "—", enviar: 0, pend: 0 };
+        map[key] = { codigo: codigo || "—", producto: producto || "—", enviar: 0, pend: 0, byFactura: {} };
       } else {
         // preferir un código/nombre real si antes no había
         if (map[key].codigo === "—" && codigo) map[key].codigo = codigo;
@@ -4386,6 +4407,11 @@ function aggregateOpPSDProductos(facturas){
 
       map[key].enviar += isFinite(c) ? c : 0;
       map[key].pend += isFinite(p) ? p : 0;
+
+      // Desglose por factura
+      if (!map[key].byFactura[fno]) map[key].byFactura[fno] = { facturaNo: fno, enviar: 0, pend: 0 };
+      map[key].byFactura[fno].enviar += isFinite(c) ? c : 0;
+      map[key].byFactura[fno].pend += isFinite(p) ? p : 0;
 
       totalEnviar += isFinite(c) ? c : 0;
       totalPend += isFinite(p) ? p : 0;
@@ -4402,7 +4428,15 @@ function aggregateOpPSDProductos(facturas){
       return String(a.codigo || "").localeCompare(String(b.codigo || ""));
     });
 
-  return { rows, totalEnviar, totalPend, totalLines };
+  // Normalizar desglose por factura a un arreglo en orden estable
+  rows.forEach(r => {
+    const bf = r.byFactura || {};
+    r.facturas = facturaOrder
+      .filter(fn => bf[fn] && ((Number(bf[fn].enviar)||0) !== 0 || (Number(bf[fn].pend)||0) !== 0))
+      .map(fn => bf[fn]);
+  });
+
+  return { rows, totalEnviar, totalPend, totalLines, facturaOrder };
 }
 
 function renderOpPSDResumenProductosGrupo(facturas){
@@ -4410,14 +4444,43 @@ function renderOpPSDResumenProductosGrupo(facturas){
   if (!rows.length) return `<div class="muted">Sin productos para mostrar en este grupo.</div>`;
 
   const showPend = rows.some(r => Number(r.pend || 0) > 0);
-  const colSpan = showPend ? 2 : 2;
+
+  const colCount = showPend ? 4 : 3;
+
+  const uniqueProductos = rows.length;
+  const facturasN = Number((facturas || []).length || 0);
+
+  const mkBreakChip = (b) => {
+    const fno = String(b?.facturaNo || "—");
+    const enviar = Number(b?.enviar || 0);
+    const pend = Number(b?.pend || 0);
+    const warn = pend > 0 ? " warn" : "";
+    const txt = `${escapeHtml(fno)} • ${fmtQty(enviar)}${pend > 0 ? ` • P ${fmtQty(pend)}` : ``}`;
+    return `<span class="op-break-chip${warn}">${txt}</span>`;
+  };
 
   return `
     <div class="card-lite op-psd-sumcard">
       <div class="op-psd-sumhead">
-        <div>
-          <strong>📦 Productos del motorista (sumado)</strong>
-          <div class="muted">Facturas: ${facturas.length} • Líneas: ${totalLines} • Enviar: <b>${fmtQty(totalEnviar)}</b>${showPend ? ` • Pend.: <b>${fmtQty(totalPend)}</b>` : ``}</div>
+        <div class="op-psd-sumtitle">
+          <div class="op-psd-sumicon">📦</div>
+          <div>
+            <div class="op-psd-sumttl">Productos del motorista</div>
+            <div class="op-psd-sumsub">${uniqueProductos} producto(s) • ${facturasN} factura(s) • ${totalLines} línea(s)</div>
+          </div>
+        </div>
+
+        <div class="op-psd-sumtot">
+          <div class="op-psd-sumtotbox">
+            <div class="k">A enviar</div>
+            <div class="v">${fmtQty(totalEnviar)}</div>
+          </div>
+          ${showPend ? `
+            <div class="op-psd-sumtotbox secondary">
+              <div class="k">Pend.</div>
+              <div class="v">${fmtQty(totalPend)}</div>
+            </div>
+          ` : ``}
         </div>
       </div>
 
@@ -4432,17 +4495,34 @@ function renderOpPSDResumenProductosGrupo(facturas){
             </tr>
           </thead>
           <tbody>
-            ${rows.map(r => `
-              <tr>
-                <td class="code">${escapeHtml(r.codigo)}</td>
-                <td>${escapeHtml(r.producto)}</td>
-                <td class="num">${fmtQty(r.enviar)}</td>
-                ${showPend ? `<td class="num">${fmtQty(r.pend)}</td>` : ``}
-              </tr>
-            `).join("")}
+            ${rows.map(r => {
+              const factCount = Array.isArray(r.facturas) ? r.facturas.length : 0;
+              const factTxt = factCount === 1 ? "1 factura" : `${factCount} facturas`;
+              const breakHtml = (r.facturas || []).map(mkBreakChip).join("");
+
+              return `
+                <tr class="op-sum-row">
+                  <td class="code"><span class="op-code-pill">${escapeHtml(r.codigo)}</span></td>
+                  <td>
+                    <div class="op-prod-name">${escapeHtml(r.producto)}</div>
+                    <div class="op-prod-sub muted">${factTxt} • Detalle por factura abajo</div>
+                  </td>
+                  <td class="num"><span class="op-qty-pill">${fmtQty(r.enviar)}</span></td>
+                  ${showPend ? `<td class="num">${Number(r.pend||0) > 0 ? `<span class="op-pend-pill">${fmtQty(r.pend)}</span>` : `<span class="muted">—</span>`}</td>` : ``}
+                </tr>
+                <tr class="op-sum-detail">
+                  <td colspan="${colCount}">
+                    <div class="op-break-wrap">
+                      <div class="op-break-label">Por factura</div>
+                      <div class="op-break-chips">${breakHtml || `<span class="muted">—</span>`}</div>
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }).join("")}
 
             <tr class="op-sum-total">
-              <td colspan="${colSpan}"><b>TOTAL</b></td>
+              <td colspan="2"><b>TOTAL</b></td>
               <td class="num"><b>${fmtQty(totalEnviar)}</b></td>
               ${showPend ? `<td class="num"><b>${fmtQty(totalPend)}</b></td>` : ``}
             </tr>
@@ -4473,30 +4553,45 @@ function renderPendienteSalidaCard(p){
   const totalShip = items.reduce((a,x)=> a + Number(x.cantidad || 0), 0);
   const totalPend = items.reduce((a,x)=> a + Number(x.pendiente || 0), 0);
 
+  const facturaNo = String(p.facturaNo || "").trim();
+  const fecha = String(p.fecha || "").trim();
+  const placa = String(p.placa || "").trim();
+  const guard = String(p.creadoEn || "").trim();
+  const lines = items.length;
+
+  const title = facturaNo ? `Factura #${escapeHtml(facturaNo)}` : `Factura`;
+
   return `
-    <div class="ticket">
-      <div class="ticket-top">
-        <div>
-          <div class="ticket-title">Factura: ${escapeHtml(p.facturaNo || "")}</div>
-          <div class="ticket-sub">
-            Fecha: ${escapeHtml(p.fecha || "")}
-            ${p.placa ? ` • Placa: ${escapeHtml(p.placa)}` : ``}
+    <div class="ticket ticket-invoice">
+      <div class="inv-head">
+        <div class="inv-main">
+          <div class="inv-no">${title}</div>
+
+          <div class="inv-meta">
+            ${fecha ? `<span>📅 ${escapeHtml(fecha)}</span>` : ``}
+            ${placa ? `<span>🚚 Placa ${escapeHtml(placa)}</span>` : ``}
+            <span>📦 ${lines} línea${lines===1 ? "" : "s"}</span>
           </div>
-          <div class="ticket-sub">Guardada: ${escapeHtml(p.creadoEn || "")}</div>
+
+          ${guard ? `<div class="inv-sub">Guardada: ${escapeHtml(guard)}</div>` : ``}
         </div>
-        <div class="ticket-total">
-          Enviar: ${fmtQty(totalShip)}${Number(totalPend||0) > 0 ? ` • Pend.: ${fmtQty(totalPend)}` : ``}
+
+        <div class="inv-totals">
+          <div class="inv-totals-label">A enviar</div>
+          <div class="inv-totals-qty">${fmtQty(totalShip)}</div>
+          ${Number(totalPend||0) > 0 ? `<div class="inv-totals-pend">Pend.: ${fmtQty(totalPend)}</div>` : ``}
         </div>
       </div>
 
-      <div class="ticket-stocks">
-        <span class="pill pill-t">Líneas: ${items.length}</span>
-        ${p.motoristaNombre ? `<span class="pill pill-p">🚚 ${escapeHtml(p.motoristaNombre)}</span>` : `<span class="pill pill-a">Sin motorista</span>`}
+      <div class="inv-chips">
+        ${p.motoristaNombre
+          ? `<span class="chip chip-accent">🚚 ${escapeHtml(p.motoristaNombre)}</span>`
+          : `<span class="chip chip-muted">Sin motorista</span>`}
       </div>
 
       ${renderOpPSDItemsTable(items)}
 
-      <div class="btn-row" style="margin-top:10px;">
+      <div class="inv-actions btn-row">
         <button type="button" class="secondary small" onclick="abrirSalidasOperadorEditarPendiente('${escSq(p.id)}')">✏️ Editar</button>
         <button type="button" class="danger small" onclick="eliminarSalidaPendienteDespachoUI('${escSq(p.id)}')">🗑️ Eliminar</button>
         <button type="button" class="small" onclick="despacharSalidaPendienteDespachoUI('${escSq(p.id)}')">🚚 Despachar</button>
