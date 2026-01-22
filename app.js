@@ -2362,10 +2362,19 @@ function opHomeSelect(mode){
   renderOperadorHomeDashboard(true);
 }
 
+
+function goOperadorHomePSD(){
+  // Fuerza el modo del resumen del HOME a "Pendientes de salida"
+  opHomeSummaryMode = "psd";
+  localStorage.setItem("opHomeSummaryMode", "psd");
+  volverHome();
+}
+
+
 function opHomeOpenFull(){
   const mode = getOpHomeSummaryMode();
   if (mode === "pend") abrirPendientesOperador();
-  else abrirPendientesSalidaOperador();
+  else goOperadorHomePSD();
 }
 
 function updateOpHomeKpiActive(){
@@ -2385,9 +2394,10 @@ function renderOperadorHomeDashboard(force = false){
   const kPend = el("opHomeKpiPend");
   const tSum = el("opHomeSummaryTitle");
   const wSum = el("opHomeSummaryBody");
+  const wMeta = el("opHomeSummaryMeta");
 
   // Si el HOME operador no está presente, no hacemos nada
-  if (!kPSD && !kPend && !tSum && !wSum) return;
+  if (!kPSD && !kPend && !tSum && !wSum && !wMeta) return;
 
   const psd = (typeof getPendientesSalidaDespachoOp === "function" ? getPendientesSalidaDespachoOp() : []) || [];
   const pend = (typeof getPendientesOp === "function" ? getPendientesOp() : []) || [];
@@ -2404,12 +2414,36 @@ function renderOperadorHomeDashboard(force = false){
       : "🚚 Pendientes de salida";
   }
 
+  if (wMeta) {
+    if (mode === "pend") {
+      const n = Number((pend || []).length || 0);
+      wMeta.textContent = `Total: ${n} factura(s)`;
+    } else {
+      const n = Number((psd || []).length || 0);
+      const set = new Set();
+      let sin = 0;
+      (psd || []).forEach(p => {
+        const nm = String(p.motoristaNombre || "").trim();
+        if (nm) set.add(nm.toUpperCase());
+        else sin++;
+      });
+      const parts = [
+        `Total: ${n} factura(s)`,
+        `Motoristas: ${set.size}`
+      ];
+      if (sin) parts.push(`Sin motorista: ${sin}`);
+      wMeta.textContent = parts.join(" • ");
+    }
+  }
+
+
   if (wSum) {
     wSum.innerHTML = (mode === "pend")
       ? renderOpHomePend(pend)
       : renderOpHomePSD(psd);
   }
 }
+
 
 function renderOpHomePSD(list){
   const arr = Array.isArray(list) ? list : [];
@@ -2426,48 +2460,58 @@ function renderOpHomePSD(list){
     groups[key].items.push(p);
   });
 
+  // Ordenar por nombre (Sin motorista primero)
   const keys = Object.keys(groups).sort((a,b)=>{
     if (a === "__SIN__") return -1;
     if (b === "__SIN__") return 1;
-    return a.localeCompare(b);
+    const ad = String(groups[a]?.display || a);
+    const bd = String(groups[b]?.display || b);
+    return ad.localeCompare(bd);
   });
 
-  const MAX_GROUPS = 4;
-  const shownKeys = keys.slice(0, MAX_GROUPS);
-
-  const html = shownKeys.map(k => {
+  return keys.map((k, idx) => {
     const g = groups[k];
     const open = (k === "__SIN__") ? "open" : "";
+    const factBoxId = `opHomePSD_facturas_${idx}`;
 
-    const MAX_IN = 3;
-    const shown = g.items.slice(0, MAX_IN);
+    // Totales rápidos para el summary
+    const agg = (typeof aggregateOpPSDProductos === "function")
+      ? aggregateOpPSDProductos(g.items || [])
+      : { totalEnviar: 0, totalPend: 0 };
 
-    const more = (g.items.length > MAX_IN)
-      ? `<div class="muted" style="margin-top:8px;">+${g.items.length - MAX_IN} factura(s) más… Usa <b>Ver todo</b> para ver el resto.</div>`
-      : ``;
+    const totalEnviar = Number(agg.totalEnviar || 0);
+    const totalPend  = Number(agg.totalPend  || 0);
+
+    const sub = `Enviar: ${fmtQty(totalEnviar)}${totalPend > 0 ? ` • Pend.: ${fmtQty(totalPend)}` : ``}`;
 
     return `
       <details class="op-group" ${open}>
         <summary>
-          <span>${escapeHtml(g.display)}</span>
+          <span class="op-group-title">
+            <span class="op-group-name">${escapeHtml(g.display)}</span>
+            <span class="op-group-sub">${sub}</span>
+          </span>
           <span class="badge">${g.items.length}</span>
         </summary>
+
         <div class="op-group-body">
           <div class="btn-row" style="margin:10px 0;">
             <button type="button" class="small" onclick="despacharGrupoPendientesSalidaOperador('${escSq(k)}')">🚚 Despachar todo (${g.items.length})</button>
+            <button type="button" class="secondary small"
+              data-show-text="📄 Ver facturas (${g.items.length})"
+              data-hide-text="📄 Ocultar facturas"
+              onclick="toggleOpPSDGroupFacturas('${factBoxId}', this)">📄 Ver facturas (${g.items.length})</button>
           </div>
-          ${shown.map(p => renderOpHomePSDMini(p)).join("")}
-          ${more}
+
+          ${renderOpPSDResumenProductosGrupo(g.items || [])}
+
+          <div id="${factBoxId}" class="hidden" style="margin-top:10px;">
+            ${g.items.map(p => renderOpHomePSDMini(p)).join("")}
+          </div>
         </div>
       </details>
     `;
   }).join("");
-
-  const note = (keys.length > MAX_GROUPS)
-    ? `<div class="muted">Mostrando ${MAX_GROUPS} de ${keys.length} motorista(s). Pulsa <b>Ver todo</b> para ver el resto.</div>`
-    : ``;
-
-  return html + note;
 }
 
 function renderOpHomePSDMini(p){
@@ -2481,19 +2525,36 @@ function renderOpHomePSDMini(p){
     p.fecha ? `Fecha ${String(p.fecha)}` : ""
   ].filter(Boolean).join(" • ");
 
+  const guard = p.creadoEn ? `Guardada: ${String(p.creadoEn)}` : "";
+
   return `
-    <div class="op-mini">
-      <div>
-        <div class="t">${escapeHtml(meta)}</div>
-        <div class="s">Enviar: ${Number(totalShip||0)} • Pend.: ${Number(totalPend||0)} • Líneas: ${items.length}</div>
+    <div class="ticket">
+      <div class="ticket-top">
+        <div>
+          <div class="ticket-title">${escapeHtml(meta)}</div>
+          ${guard ? `<div class="ticket-sub">${escapeHtml(guard)}</div>` : ``}
+        </div>
+        <div class="ticket-total">
+          Enviar: ${fmtQty(totalShip)}${Number(totalPend||0) > 0 ? ` • Pend.: ${fmtQty(totalPend)}` : ``}
+        </div>
       </div>
-      <div class="op-mini-actions">
-        <button type="button" class="small secondary" onclick="abrirSalidasOperadorEditarPendiente('${escSq(p.id)}')">✏️</button>
-        <button type="button" class="small" onclick="despacharSalidaPendienteDespachoUI('${escSq(p.id)}')">🚚</button>
+
+      <div class="ticket-stocks">
+        <span class="pill pill-t">Líneas: ${items.length}</span>
+        ${p.motoristaNombre ? `<span class="pill pill-p">🚚 ${escapeHtml(p.motoristaNombre)}</span>` : `<span class="pill pill-a">Sin motorista</span>`}
+      </div>
+
+      ${renderOpPSDItemsTable(items)}
+
+      <div class="btn-row" style="margin-top:10px;">
+        <button type="button" class="secondary small" onclick="abrirSalidasOperadorEditarPendiente('${escSq(p.id)}')">✏️ Editar</button>
+        <button type="button" class="danger small" onclick="eliminarSalidaPendienteDespachoUI('${escSq(p.id)}')">🗑️ Eliminar</button>
+        <button type="button" class="small" onclick="despacharSalidaPendienteDespachoUI('${escSq(p.id)}')">🚚 Despachar</button>
       </div>
     </div>
   `;
 }
+
 
 function renderOpHomePend(list){
   const arr = Array.isArray(list) ? list : [];
@@ -2501,10 +2562,7 @@ function renderOpHomePend(list){
     return `<div class="muted">No hay facturas con productos pendientes.</div>`;
   }
 
-  const MAX = 5;
-  const shown = arr.slice(0, MAX);
-
-  const html = shown.map(p => {
+  const html = arr.map(p => {
     const items = Array.isArray(p.items) ? p.items : [];
     const lineas = Number(p.totalLineas || items.length || 0);
     const unid = Number(p.totalUnidades || 0);
@@ -2532,11 +2590,7 @@ function renderOpHomePend(list){
     `;
   }).join("");
 
-  const note = (arr.length > MAX)
-    ? `<div class="muted">Mostrando ${MAX} de ${arr.length}. Pulsa <b>Ver todo</b> para ver el resto.</div>`
-    : "";
-
-  return html + note;
+  return html;
 }
 
 
@@ -4171,37 +4225,12 @@ async function eliminarMotoristaOperador(id){
 
 /* ================= OPERADOR: PENDIENTES DE SALIDA (cola de despacho) ================= */
 async function abrirPendientesSalidaOperador(){
+  // ✅ Ya no existe un módulo separado: todo se muestra en el HOME del OPERADOR.
   if (isBodeguero()) {
     await uiAlert("Esta opción es solo para el rol OPERADOR.");
     return;
   }
-
-  vendedorHome.classList.add("hidden");
-  operadorHome.classList.add("hidden");
-  contenido.classList.remove("hidden");
-
-  getPendientesSalidaDespachoOp();
-
-  contenido.innerHTML = `
-    <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
-
-    <div class="card">
-      <strong>🚚 Pendientes de salida</strong>
-      <div class="muted">Todas las facturas de salida se guardan aquí. Solo pasan a Movimientos cuando presionas <b>Despachar</b>.</div>
-    </div>
-
-    <input id="opPSDSearch" placeholder="🔍 Buscar por factura, motorista, placa, código o producto" />
-
-    <div id="opPSDWrap"></div>
-  `;
-
-  el("opPSDSearch")?.addEventListener("input", () => {
-    const w = el("opPSDWrap");
-    if (w) w.innerHTML = renderPendientesSalidaOperador();
-  });
-
-  const w = el("opPSDWrap");
-  if (w) w.innerHTML = renderPendientesSalidaOperador();
+  goOperadorHomePSD();
 }
 
 function renderPendientesSalidaOperador(){
@@ -4240,9 +4269,10 @@ function renderPendientesSalidaOperador(){
     return a.localeCompare(b);
   });
 
-  return keys.map(k => {
+  return keys.map((k,idx) => {
     const g = groups[k];
     const open = (k === "__SIN__") ? "open" : "";
+    const factBoxId = `opPSD_facturas_${idx}`;
     return `
       <details class="op-group" ${open}>
         <summary>
@@ -4250,11 +4280,192 @@ function renderPendientesSalidaOperador(){
           <span class="badge">${g.items.length}</span>
         </summary>
         <div class="op-group-body">
-          <div class="btn-row" style="margin:10px 0;"><button type="button" class="small" onclick="despacharGrupoPendientesSalidaOperador('${escSq(k)}')">🚚 Despachar todo (${g.items.length})</button></div>${g.items.map(p => renderPendienteSalidaCard(p)).join("")}
+          <div class="btn-row" style="margin:10px 0;">
+            <button type="button" class="small" onclick="despacharGrupoPendientesSalidaOperador('${escSq(k)}')">🚚 Despachar todo (${g.items.length})</button>
+            <button type="button" class="secondary small"
+              data-show-text="📄 Ver facturas (${g.items.length})"
+              data-hide-text="📄 Ocultar facturas"
+              onclick="toggleOpPSDGroupFacturas('${factBoxId}', this)">📄 Ver facturas (${g.items.length})</button>
+          </div>
+
+          ${renderOpPSDResumenProductosGrupo(g.items)}
+
+          <div id="${factBoxId}" class="hidden">
+            ${g.items.map(p => renderPendienteSalidaCard(p)).join("")}
+          </div>
         </div>
       </details>
     `;
   }).join("");
+}
+
+function fmtQty(n){
+  const x = Number(n || 0);
+  if (!isFinite(x)) return "0";
+  const y = Math.round(x * 100) / 100;
+  const isInt = Math.abs(y - Math.round(y)) < 1e-9;
+  return isInt ? String(Math.round(y)) : String(y);
+}
+
+function renderOpPSDItemsTable(items, opts){
+  const arr = Array.isArray(items) ? items : [];
+  const rows = arr
+    .filter(it => String(it.codigo || "").trim() || String(it.producto || it.nombre || "").trim())
+    .map(it => ({
+      codigo: String(it.codigo || "").trim() || "—",
+      producto: String(it.producto || it.nombre || "").trim() || "—",
+      enviar: Number(it.cantidad || 0),
+      pend: Number(it.pendiente || 0)
+    }));
+
+  if (!rows.length) return `<div class="muted" style="margin-top:10px;">Sin productos para mostrar.</div>`;
+
+  const showPend = (opts && opts.showPend === false)
+    ? false
+    : rows.some(r => Number(r.pend || 0) > 0);
+
+  const totalEnviar = rows.reduce((a,r)=> a + (isFinite(r.enviar) ? r.enviar : 0), 0);
+  const totalPend  = rows.reduce((a,r)=> a + (isFinite(r.pend) ? r.pend : 0), 0);
+
+  return `
+    <div class="op-psd-table-wrap" style="margin-top:10px;">
+      <table class="op-sum-table op-inv-table">
+        <thead>
+          <tr>
+            <th style="width:140px;">Código</th>
+            <th>Producto</th>
+            <th style="width:110px; text-align:right;">Cantidad</th>
+            ${showPend ? `<th style="width:110px; text-align:right;">Pend.</th>` : ``}
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr>
+              <td class="code">${escapeHtml(r.codigo)}</td>
+              <td>${escapeHtml(r.producto)}</td>
+              <td class="num">${fmtQty(r.enviar)}</td>
+              ${showPend ? `<td class="num">${fmtQty(r.pend)}</td>` : ``}
+            </tr>
+          `).join("")}
+
+          <tr class="op-sum-total">
+            <td colspan="2"><b>TOTAL</b></td>
+            <td class="num"><b>${fmtQty(totalEnviar)}</b></td>
+            ${showPend ? `<td class="num"><b>${fmtQty(totalPend)}</b></td>` : ``}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function aggregateOpPSDProductos(facturas){
+  const map = {};
+  let totalEnviar = 0;
+  let totalPend = 0;
+  let totalLines = 0;
+
+  (facturas || []).forEach(f => {
+    const its = Array.isArray(f.items) ? f.items : [];
+    its.forEach(it => {
+      totalLines++;
+      const codigo = String(it.codigo || "").trim();
+      const producto = String(it.producto || it.nombre || "").trim();
+      const key = (codigo || producto || "").toUpperCase() || ("__" + totalLines);
+
+      if (!map[key]) {
+        map[key] = { codigo: codigo || "—", producto: producto || "—", enviar: 0, pend: 0 };
+      } else {
+        // preferir un código/nombre real si antes no había
+        if (map[key].codigo === "—" && codigo) map[key].codigo = codigo;
+        if (map[key].producto === "—" && producto) map[key].producto = producto;
+      }
+
+      const c = Number(it.cantidad || 0);
+      const p = Number(it.pendiente || 0);
+
+      map[key].enviar += isFinite(c) ? c : 0;
+      map[key].pend += isFinite(p) ? p : 0;
+
+      totalEnviar += isFinite(c) ? c : 0;
+      totalPend += isFinite(p) ? p : 0;
+    });
+  });
+
+  const rows = Object.values(map)
+    .filter(r => (Number(r.enviar) || 0) !== 0 || (Number(r.pend) || 0) !== 0)
+    .sort((a,b)=>{
+      const an = String(a.producto || "");
+      const bn = String(b.producto || "");
+      const cn = an.localeCompare(bn);
+      if (cn !== 0) return cn;
+      return String(a.codigo || "").localeCompare(String(b.codigo || ""));
+    });
+
+  return { rows, totalEnviar, totalPend, totalLines };
+}
+
+function renderOpPSDResumenProductosGrupo(facturas){
+  const { rows, totalEnviar, totalPend, totalLines } = aggregateOpPSDProductos(facturas || []);
+  if (!rows.length) return `<div class="muted">Sin productos para mostrar en este grupo.</div>`;
+
+  const showPend = rows.some(r => Number(r.pend || 0) > 0);
+  const colSpan = showPend ? 2 : 2;
+
+  return `
+    <div class="card-lite op-psd-sumcard">
+      <div class="op-psd-sumhead">
+        <div>
+          <strong>📦 Productos del motorista (sumado)</strong>
+          <div class="muted">Facturas: ${facturas.length} • Líneas: ${totalLines} • Enviar: <b>${fmtQty(totalEnviar)}</b>${showPend ? ` • Pend.: <b>${fmtQty(totalPend)}</b>` : ``}</div>
+        </div>
+      </div>
+
+      <div class="op-psd-table-wrap">
+        <table class="op-sum-table">
+          <thead>
+            <tr>
+              <th style="width:140px;">Código</th>
+              <th>Producto</th>
+              <th style="width:110px; text-align:right;">Cantidad</th>
+              ${showPend ? `<th style="width:110px; text-align:right;">Pend.</th>` : ``}
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(r => `
+              <tr>
+                <td class="code">${escapeHtml(r.codigo)}</td>
+                <td>${escapeHtml(r.producto)}</td>
+                <td class="num">${fmtQty(r.enviar)}</td>
+                ${showPend ? `<td class="num">${fmtQty(r.pend)}</td>` : ``}
+              </tr>
+            `).join("")}
+
+            <tr class="op-sum-total">
+              <td colspan="${colSpan}"><b>TOTAL</b></td>
+              <td class="num"><b>${fmtQty(totalEnviar)}</b></td>
+              ${showPend ? `<td class="num"><b>${fmtQty(totalPend)}</b></td>` : ``}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function toggleOpPSDGroupFacturas(domId, btn){
+  const box = el(domId);
+  if (!box) return;
+
+  const willShow = box.classList.contains("hidden");
+  if (willShow) box.classList.remove("hidden");
+  else box.classList.add("hidden");
+
+  if (btn) {
+    const showText = btn.getAttribute("data-show-text") || "📄 Ver facturas";
+    const hideText = btn.getAttribute("data-hide-text") || "📄 Ocultar facturas";
+    btn.textContent = willShow ? hideText : showText;
+  }
 }
 
 function renderPendienteSalidaCard(p){
@@ -4274,7 +4485,7 @@ function renderPendienteSalidaCard(p){
           <div class="ticket-sub">Guardada: ${escapeHtml(p.creadoEn || "")}</div>
         </div>
         <div class="ticket-total">
-          Enviar: ${Number(totalShip||0)} • Pend.: ${Number(totalPend||0)}
+          Enviar: ${fmtQty(totalShip)}${Number(totalPend||0) > 0 ? ` • Pend.: ${fmtQty(totalPend)}` : ``}
         </div>
       </div>
 
@@ -4283,10 +4494,12 @@ function renderPendienteSalidaCard(p){
         ${p.motoristaNombre ? `<span class="pill pill-p">🚚 ${escapeHtml(p.motoristaNombre)}</span>` : `<span class="pill pill-a">Sin motorista</span>`}
       </div>
 
+      ${renderOpPSDItemsTable(items)}
+
       <div class="btn-row" style="margin-top:10px;">
-        <button type="button" class="secondary small" onclick="abrirSalidasOperadorEditarPendiente('${escapeHtml(p.id)}')">✏️ Editar</button>
-        <button type="button" class="danger small" onclick="eliminarSalidaPendienteDespachoUI('${escapeHtml(p.id)}')">🗑️ Eliminar</button>
-        <button type="button" class="small" onclick="despacharSalidaPendienteDespachoUI('${escapeHtml(p.id)}')">🚚 Despachar</button>
+        <button type="button" class="secondary small" onclick="abrirSalidasOperadorEditarPendiente('${escSq(p.id)}')">✏️ Editar</button>
+        <button type="button" class="danger small" onclick="eliminarSalidaPendienteDespachoUI('${escSq(p.id)}')">🗑️ Eliminar</button>
+        <button type="button" class="small" onclick="despacharSalidaPendienteDespachoUI('${escSq(p.id)}')">🚚 Despachar</button>
       </div>
     </div>
   `;
@@ -4302,7 +4515,7 @@ async function abrirSalidasOperadorEditarPendiente(pendId){
   const p = findSalidaPendienteDespachoById(pendId);
   if (!p) {
     await uiAlert("No se encontró la factura pendiente.");
-    abrirPendientesSalidaOperador();
+    goOperadorHomePSD();
     return;
   }
 
@@ -6304,7 +6517,7 @@ async function guardarFacturaSalidas(){
     await uiAlert("✅ Factura actualizada en Pendientes de salida.");
     clearOperadorDraft("SALIDA");
     operadorEdit = null;
-    abrirPendientesSalidaOperador();
+    goOperadorHomePSD();
     return;
   }
 
@@ -6364,21 +6577,21 @@ async function guardarFacturaSalidas(){
   savePendientesSalidaDespachoOp();
 
   clearOperadorDraft("SALIDA");
-  await uiAlert("✅ Factura enviada a Pendientes de salida. Usa “Pendientes de salida” para DESPACHARLA y que aparezca en Movimientos.");
+  await uiAlert("✅ Factura enviada a Pendientes de salida. En el HOME del Operador (Pendientes de salida) puedes DESPACHARLA y así aparecerá en Movimientos.");
 
-  // Mantenerse en Salidas para capturar la siguiente factura sin cambiar de pantalla
+  // Volver al HOME (Pendientes de salida)
   salidaFactura = {
     id: Date.now(),
     fechaISO: f.fechaISO || new Date().toISOString().slice(0,10),
     facturaNo: "",
-    motoristaId: f.motoristaId || "",
-    motoristaNombre: String(f.motoristaNombre || "").trim() || (f.motoristaId ? getMotoristaNombreById(f.motoristaId) : ""),
-    placa: String(f.placa || "").trim().toUpperCase(),
+    motoristaId: "",
+    motoristaNombre: "",
+    placa: "",
     dispatchMode: false,
     items: []
   };
   operadorEdit = null;
-  renderSalidasOperador();
+  goOperadorHomePSD();
   return;
 }
 /* ================= OPERADOR: TRANSFERENCIAS ================= */
