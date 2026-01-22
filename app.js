@@ -4488,10 +4488,10 @@ function renderOpPSDResumenProductosGrupo(facturas){
         <table class="op-sum-table">
           <thead>
             <tr>
-              <th style="width:140px;">Código</th>
+              <th class="col-code">Código</th>
               <th>Producto</th>
-              <th style="width:110px; text-align:right;">Cantidad</th>
-              ${showPend ? `<th style="width:110px; text-align:right;">Pend.</th>` : ``}
+              <th class="col-qty" style="text-align:right;">Cantidad</th>
+              ${showPend ? `<th class="col-pend" style="text-align:right;">Pend.</th>` : ``}
             </tr>
           </thead>
           <tbody>
@@ -4502,13 +4502,13 @@ function renderOpPSDResumenProductosGrupo(facturas){
 
               return `
                 <tr class="op-sum-row">
-                  <td class="code"><span class="op-code-pill">${escapeHtml(r.codigo)}</span></td>
-                  <td>
+                  <td class="code" data-label="Código"><span class="op-code-pill">${escapeHtml(r.codigo)}</span></td>
+                  <td data-label="Producto">
                     <div class="op-prod-name">${escapeHtml(r.producto)}</div>
                     <div class="op-prod-sub muted">${factTxt} • Detalle por factura abajo</div>
                   </td>
-                  <td class="num"><span class="op-qty-pill">${fmtQty(r.enviar)}</span></td>
-                  ${showPend ? `<td class="num">${Number(r.pend||0) > 0 ? `<span class="op-pend-pill">${fmtQty(r.pend)}</span>` : `<span class="muted">—</span>`}</td>` : ``}
+                  <td class="num" data-label="Cantidad"><span class="op-qty-pill">${fmtQty(r.enviar)}</span></td>
+                  ${showPend ? `<td class="num" data-label="Pend.">${Number(r.pend||0) > 0 ? `<span class="op-pend-pill">${fmtQty(r.pend)}</span>` : `<span class="muted">—</span>`}</td>` : ``}
                 </tr>
                 <tr class="op-sum-detail">
                   <td colspan="${colCount}">
@@ -4524,7 +4524,7 @@ function renderOpPSDResumenProductosGrupo(facturas){
             <tr class="op-sum-total">
               <td colspan="2"><b>TOTAL</b></td>
               <td class="num"><b>${fmtQty(totalEnviar)}</b></td>
-              ${showPend ? `<td class="num"><b>${fmtQty(totalPend)}</b></td>` : ``}
+              ${showPend ? `<td class="num" data-label="Pend."><b>${fmtQty(totalPend)}</b></td>` : ``}
             </tr>
           </tbody>
         </table>
