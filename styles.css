@@ -1146,6 +1146,107 @@ details.op-group summary::-webkit-details-marker{
   background:var(--panel-2);
 }
 
+
+/* ===== OPERADOR: Resumen de productos (sumado) sin scroll horizontal en pantallas angostas ===== */
+@media (max-width: 640px){
+  /* Quitar scroll horizontal del wrapper del resumen */
+  .op-psd-sumcard .op-psd-table-wrap{
+    overflow-x: visible;
+  }
+
+  /* Convertir la tabla del resumen a formato "cards" (stacked rows) */
+  .op-psd-sumcard .op-sum-table{
+    display:block;
+  }
+  .op-psd-sumcard .op-sum-table thead{
+    display:none;
+  }
+  .op-psd-sumcard .op-sum-table tbody{
+    display:block;
+  }
+  .op-psd-sumcard .op-sum-table tr{
+    display:block;
+    width:100%;
+  }
+
+  .op-psd-sumcard .op-sum-row{
+    border:1px solid var(--borde);
+    border-radius:14px;
+    padding:8px;
+    margin:10px 0 6px;
+    background:var(--panel);
+  }
+
+  .op-psd-sumcard .op-sum-row td{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:10px;
+    width:100%;
+    border-bottom:1px dashed var(--borde);
+    padding:8px 4px;
+  }
+  .op-psd-sumcard .op-sum-row td:last-child{
+    border-bottom:none;
+  }
+
+  .op-psd-sumcard .op-sum-row td::before{
+    content: attr(data-label);
+    flex:0 0 auto;
+    font-size:11px;
+    font-weight:950;
+    letter-spacing:.03em;
+    text-transform:uppercase;
+    color:var(--gris);
+    padding-top:2px;
+  }
+
+  .op-psd-sumcard .op-sum-row td.code,
+  .op-psd-sumcard .op-sum-row td.num{
+    text-align:left;
+    white-space:normal;
+  }
+
+  .op-psd-sumcard .op-code-pill,
+  .op-psd-sumcard .op-qty-pill,
+  .op-psd-sumcard .op-pend-pill{
+    white-space:normal;
+    max-width:100%;
+  }
+
+  .op-psd-sumcard .op-break-wrap{
+    width:100%;
+  }
+  .op-psd-sumcard .op-break-chips{
+    max-width:100%;
+  }
+  .op-psd-sumcard .op-break-chip{
+    white-space:normal;
+    max-width:100%;
+  }
+
+  .op-psd-sumcard .op-sum-detail td{
+    display:block;
+    width:100%;
+    border:none;
+    padding:0;
+  }
+
+  /* La fila total se ve como un footer simple (ya tienes totales arriba) */
+  .op-psd-sumcard .op-sum-total{
+    margin-top:10px;
+  }
+  .op-psd-sumcard .op-sum-total td{
+    display:block;
+    width:100%;
+    padding:8px 10px;
+    border:1px solid var(--borde);
+    border-radius:14px;
+    background:var(--panel-2);
+  }
+}
+
+
 @media (max-width: 420px){
   .op-psd-sumtotbox{ min-width: 104px; }
   .op-psd-sumttl{ font-size:13px; }
