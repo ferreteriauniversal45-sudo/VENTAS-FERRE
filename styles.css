@@ -30,7 +30,7 @@
 *{ box-sizing:border-box; font-family:system-ui, sans-serif; }
 body{ margin:0; background:var(--fondo); color:var(--texto); padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--safe-bottom)); }
 
-.hidden{ display:none; }
+.hidden{ display:none !important; }
 #login.hidden{ display:none !important; } /* evita que el login quede encima */
 
 /* ---------- UI base ---------- */
@@ -899,6 +899,203 @@ details.op-group summary::-webkit-details-marker{
   margin-top:10px;
 }
 
+/* Card del resumen (más "pro") */
+.op-psd-sumhead{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  align-items:flex-start;
+  flex-wrap:wrap;
+  padding-bottom:10px;
+  margin-bottom:10px;
+  border-bottom:1px dashed var(--borde);
+}
+
+.op-psd-sumtitle{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.op-psd-sumicon{
+  width:36px;
+  height:36px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:12px;
+  background:var(--panel-2);
+  border:1px solid var(--borde);
+  font-size:18px;
+}
+
+.op-psd-sumttl{
+  font-weight:950;
+  font-size:14px;
+  letter-spacing:.01em;
+}
+
+.op-psd-sumsub{
+  margin-top:2px;
+  font-size:12px;
+  color:var(--gris);
+  font-weight:800;
+}
+
+.op-psd-sumtot{
+  display:flex;
+  gap:10px;
+  align-items:stretch;
+}
+
+.op-psd-sumtotbox{
+  padding:8px 10px;
+  border:1px solid var(--borde);
+  border-radius:12px;
+  background:var(--panel-2);
+  text-align:right;
+  min-width:120px;
+}
+
+.op-psd-sumtotbox.secondary{
+  border-style:dashed;
+}
+
+.op-psd-sumtotbox .k{
+  font-size:10px;
+  color:var(--gris);
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  font-weight:950;
+}
+
+.op-psd-sumtotbox .v{
+  font-weight:950;
+  font-size:16px;
+  line-height:1.1;
+  margin-top:2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Fila de producto con "píldoras" */
+.op-code-pill{
+  display:inline-flex;
+  padding:6px 8px;
+  border-radius:10px;
+  background:var(--panel-2);
+  border:1px solid var(--borde);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-weight:950;
+  font-size:12px;
+  white-space:nowrap;
+}
+
+.op-prod-name{
+  font-weight:950;
+}
+
+.op-prod-sub{
+  margin-top:2px;
+  font-size:11px;
+  color:var(--gris);
+}
+
+.op-qty-pill{
+  display:inline-flex;
+  padding:6px 10px;
+  border-radius:999px;
+  background:var(--panel-2);
+  border:1px solid var(--borde);
+  font-weight:950;
+  font-variant-numeric: tabular-nums;
+  white-space:nowrap;
+}
+
+.op-pend-pill{
+  display:inline-flex;
+  padding:6px 10px;
+  border-radius:999px;
+  background:var(--panel-2);
+  border:1px dashed var(--borde);
+  font-weight:950;
+  font-variant-numeric: tabular-nums;
+  white-space:nowrap;
+}
+
+.op-sum-detail td{
+  padding-top:0;
+}
+
+.op-break-wrap{
+  display:flex;
+  gap:10px;
+  align-items:flex-start;
+  flex-wrap:wrap;
+  padding:8px 10px;
+  border:1px dashed var(--borde);
+  border-radius:12px;
+  background:var(--panel);
+}
+
+.op-break-label{
+  font-size:11px;
+  font-weight:950;
+  color:var(--gris);
+  text-transform:uppercase;
+  letter-spacing:.05em;
+  white-space:nowrap;
+  padding-top:2px;
+}
+
+.op-break-chips{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+
+.op-break-chip{
+  display:inline-flex;
+  align-items:center;
+  padding:5px 8px;
+  border-radius:999px;
+  border:1px solid var(--borde);
+  background:var(--panel-2);
+  font-size:11px;
+  font-weight:950;
+  white-space:nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.op-break-chip.warn{
+  border-color:#f59e0b;
+  background:#fffbeb;
+  color:#92400e;
+}
+
+@media (max-width: 420px){
+  .op-psd-sumhead{
+    gap:10px;
+  }
+  .op-psd-sumtot{
+    width:100%;
+    justify-content:flex-start;
+  }
+  .op-psd-sumtotbox{
+    min-width: 98px;
+    flex:1;
+  }
+  .op-sum-table th,
+  .op-sum-table td{
+    padding:8px;
+  }
+  .op-psd-sumsub{
+    font-size:11px;
+  }
+  .op-break-wrap{
+    padding:8px;
+  }
+}
+
 .op-sum-table{
   width:100%;
   border-collapse:separate;
@@ -910,6 +1107,14 @@ details.op-group summary::-webkit-details-marker{
   padding:10px;
   border-bottom:1px solid var(--borde);
   vertical-align:top;
+}
+
+.op-sum-row td{
+  vertical-align:middle;
+}
+
+.op-sum-detail td{
+  border-bottom:1px solid var(--borde);
 }
 
 .op-sum-table thead th{
@@ -941,6 +1146,15 @@ details.op-group summary::-webkit-details-marker{
   background:var(--panel-2);
 }
 
+@media (max-width: 420px){
+  .op-psd-sumtotbox{ min-width: 104px; }
+  .op-psd-sumttl{ font-size:13px; }
+  .op-sum-table th,
+  .op-sum-table td{ padding:8px; }
+  .op-break-wrap{ padding:8px; }
+  .op-break-chip{ font-size:10.5px; }
+}
+
 /* Tabla dentro de cada factura (Pendientes de salida) */
 .op-sum-table.op-inv-table th,
 .op-sum-table.op-inv-table td{
@@ -949,6 +1163,139 @@ details.op-group summary::-webkit-details-marker{
 
 .op-sum-table.op-inv-table thead th{
   font-size:11px;
+}
+
+
+/* ===== OPERADOR: Facturas estilo "invoice" (compactas y responsive) ===== */
+.ticket.ticket-invoice{
+  padding:10px;
+  border-radius:14px;
+  border:1px solid var(--borde);
+  border-left:4px solid var(--azul);
+  background:var(--panel);
+  box-shadow:0 6px 16px rgba(0,0,0,.06);
+}
+
+.ticket-invoice .inv-head{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  align-items:flex-start;
+}
+
+.ticket-invoice .inv-no{
+  font-weight:900;
+  font-size:14px;
+  letter-spacing:.01em;
+}
+
+.ticket-invoice .inv-meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px 10px;
+  margin-top:3px;
+  font-size:11px;
+  color:var(--gris);
+}
+.ticket-invoice .inv-meta span{
+  white-space:nowrap;
+}
+
+.ticket-invoice .inv-sub{
+  margin-top:4px;
+  font-size:11px;
+  color:var(--gris);
+}
+
+.ticket-invoice .inv-totals{
+  padding:8px 10px;
+  border:1px dashed var(--borde);
+  border-radius:12px;
+  background:var(--panel-2);
+  text-align:right;
+  min-width:128px;
+}
+
+.ticket-invoice .inv-totals-label{
+  font-size:10px;
+  color:var(--gris);
+  text-transform:uppercase;
+  letter-spacing:.06em;
+}
+
+.ticket-invoice .inv-totals-qty{
+  font-weight:900;
+  font-size:16px;
+  line-height:1.1;
+  margin-top:2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ticket-invoice .inv-totals-pend{
+  margin-top:3px;
+  font-size:11px;
+  color:var(--gris);
+}
+
+.ticket-invoice .inv-chips{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:10px;
+}
+
+.chip{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:900;
+  border:1px solid var(--borde);
+  background:var(--panel-2);
+  color:var(--texto);
+}
+
+.chip-accent{
+  border-color: var(--azul);
+}
+
+.chip-muted{
+  opacity:.9;
+}
+
+.ticket-invoice .op-psd-table-wrap{
+  border:1px solid var(--borde);
+  border-radius:12px;
+  overflow:auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ticket-invoice .op-sum-table th,
+.ticket-invoice .op-sum-table td{
+  padding:7px 8px;
+}
+
+.ticket-invoice .inv-actions{
+  margin-top:10px;
+}
+
+.ticket-invoice .inv-actions button{
+  flex:1 1 120px;
+}
+
+/* Contenedor de facturas individuales (grid en pantallas anchas, 1 columna en móviles) */
+.op-inv-grid{
+  display:grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap:10px;
+}
+
+@media (max-width: 420px){
+  .ticket-invoice .inv-head{ flex-direction:column; }
+  .ticket-invoice .inv-totals{ width:100%; text-align:left; }
+  .op-inv-grid{ grid-template-columns: 1fr; }
 }
 
 
