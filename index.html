@@ -255,7 +255,10 @@
 <div id="modalProductos" class="modal">
   <div class="modal-card">
     <h3>Buscar producto</h3>
-    <input id="buscarProductoModal" placeholder="🔍 Buscar por código o nombre" />
+    <div class="addmov-grid">
+      <input id="buscarProductoModal" placeholder="🔍 Buscar por código, nombre o barras" />
+      <button type="button" class="op-icon-btn secondary" onclick="abrirBarcodeVendedor()" title="Código de barras">🏷️</button>
+    </div>
     <div id="listaProductosModal" class="modal-list"></div>
 
     <div class="btn-row">
@@ -268,11 +271,32 @@
 <div id="modalProductosOperador" class="modal">
   <div class="modal-card">
     <h3>Buscar producto</h3>
-    <input id="buscarProductoOperador" placeholder="🔍 Buscar por nombre (o código)" />
+    <div class="addmov-grid">
+      <input id="buscarProductoOperador" placeholder="🔍 Buscar por nombre, código o barras" />
+      <button type="button" class="op-icon-btn secondary" onclick="abrirBarcodeOperador()" title="Código de barras">🏷️</button>
+    </div>
     <div id="listaProductosOperador" class="modal-list"></div>
 
     <div class="btn-row">
       <button type="button" class="secondary" onclick="cerrarModalProductosOperador()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+
+
+<!-- ================= MODAL: CÓDIGO DE BARRAS (ALIAS) ================= -->
+<div id="modalBarcode" class="modal">
+  <div class="modal-card">
+    <h3 id="barcodeTitle">Buscar por código de barras</h3>
+    <p id="barcodeSub" class="muted">Escribe o escanea el código de barras (ALIAS). Al encontrarlo se selecciona automáticamente.</p>
+
+    <input id="barcodeInput" inputmode="numeric" autocomplete="off" placeholder="Ej: 7453078507354" />
+
+    <div id="barcodeStatus" class="barcode-status hidden"></div>
+
+    <div class="btn-row">
+      <button type="button" class="secondary" onclick="cerrarModalBarcode()">Cerrar</button>
     </div>
   </div>
 </div>
@@ -284,9 +308,10 @@
     <h3 id="addMovTitulo">Agregar producto</h3>
     <p id="addMovSub" class="muted">Escribe el código o usa la lupa para buscarlo por nombre.</p>
 
-    <div class="addmov-grid">
+    <div class="addmov-grid triple">
       <input id="addMovCodigo" placeholder="12-0065lb" />
       <button type="button" class="op-icon-btn secondary" onclick="abrirBusquedaProductoParaAddMov()" title="Buscar">🔎</button>
+      <button type="button" class="op-icon-btn secondary" onclick="abrirBarcodeAddMov()" title="Código de barras">🏷️</button>
     </div>
 
     <div id="addMovSug" class="op-sugs" style="padding:0; margin:-4px 0 10px;"></div>
