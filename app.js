@@ -6,6 +6,7 @@ const URLS = {
   invA: BASE_RAW + "inventarioanexo.json",
   invT: BASE_RAW + "inventariotienda.json",
   preciosadmin: BASE_RAW + "preciosadmin.json",
+  catalogoProductos: BASE_RAW + "Catalogo.json",
   motoristas: BASE_RAW + "motoristas.json",
   placas: BASE_RAW + "placas.json",
   version: BASE_RAW + "inventario_version.json"
@@ -399,7 +400,7 @@ function updateSettingsInfo(){
   let v = "";
   try { v = String(localStorage.getItem("inventarioVersion") || "0"); } catch {}
 
-  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin];
+  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin, URLS.catalogoProductos];
   const lastSync = Math.max(0, ...invUrls.map(u => __getLastSyncTsForUrl(u)));
 
   const online = (typeof navigator !== "undefined" && "onLine" in navigator)
@@ -1298,6 +1299,24 @@ function getProdByCodigo(codigo){
   );
 }
 
+// ✅ Normalizar código de barras (ALIAS)
+function normalizeAlias(v){
+  return String(v || "").trim().replace(/\s+/g, "");
+}
+
+// ✅ Buscar producto por ALIAS (código de barras)
+function getProdByAlias(alias){
+  const key = normalizeAlias(alias);
+  if (!key) return null;
+
+  return (
+    catalogoAliasMap.get(key) ||
+    catalogoAliasMap.get(key.toLowerCase()) ||
+    catalogoAliasMap.get(key.toUpperCase()) ||
+    null
+  );
+}
+
 // ✅ Stock disponible (Principal + Anexo + Tienda)
 function stockDisponibleTotal(prod){
   if (!prod) return 0;
@@ -1490,6 +1509,7 @@ let cotizaciones = JSON.parse(localStorage.getItem("cotizaciones") || "[]");
 
 let catalogo = [];
 let catalogoMap = new Map();
+let catalogoAliasMap = new Map();
 let catalogoCargado = false;
 
 let cotizacionActual = null;
@@ -1735,11 +1755,12 @@ async function ensureCatalogoCargado(forceRefresh = false){
 
   await checkVersionAndReload();
 
-  const [invP, invA, invT, preciosadmin] = await Promise.all([
+  const [invP, invA, invT, preciosadmin, catalogoProductos] = await Promise.all([
     fetchJson(URLS.invP),
     fetchJson(URLS.invA),
     fetchJson(URLS.invT),
-    fetchJson(URLS.preciosadmin)
+    fetchJson(URLS.preciosadmin),
+    fetchJson(URLS.catalogoProductos).catch(() => ({}))
   ]);
 
   // ✅ aplicar cambios locales de ADMIN (si existen)
@@ -1749,11 +1770,13 @@ async function ensureCatalogoCargado(forceRefresh = false){
     ...Object.keys(invP || {}),
     ...Object.keys(invA || {}),
     ...Object.keys(invT || {}),
-    ...Object.keys(preciosadmin || {})
+    ...Object.keys(preciosadmin || {}),
+    ...Object.keys(catalogoProductos || {})
   ]);
 
   catalogo = [];
   catalogoMap = new Map();
+  catalogoAliasMap = new Map();
   inventarioAdmin = [];
 
   for (const codigo of codes) {
@@ -1762,6 +1785,11 @@ async function ensureCatalogoCargado(forceRefresh = false){
     const t = invT?.[codigo];
 
     const base = p || t || a || {};
+    const cat = (catalogoProductos && catalogoProductos[codigo]) ? catalogoProductos[codigo] : null;
+    const alias = normalizeAlias(cat?.ALIAS ?? cat?.alias ?? "");
+    const catProducto = String(cat?.PRODUCTO ?? cat?.producto ?? "").trim();
+    const catDepto = String(cat?.DEPARTAMENTO ?? cat?.departamento ?? "").trim();
+    const catCategoria = String(cat?.CATEGORIA ?? cat?.categoria ?? "").trim();
     const data = preciosadmin?.[codigo] || {};
     const local = preciosLocal?.[codigo] || {};
 
@@ -1773,8 +1801,10 @@ async function ensureCatalogoCargado(forceRefresh = false){
 
     const obj = {
       codigo,
-      producto: base.producto || "",
-      departamento: base.departamento || "",
+      producto: catProducto || base.producto || "",
+      departamento: catDepto || base.departamento || "",
+      categoria: catCategoria || "",
+      alias: alias || "",
       stockP,
       stockA,
       stockT,
@@ -1799,6 +1829,12 @@ async function ensureCatalogoCargado(forceRefresh = false){
     catalogoMap.set(String(codigo).toLowerCase(), obj);
     catalogoMap.set(String(codigo).toUpperCase(), obj);
 
+    if (alias) {
+      catalogoAliasMap.set(alias, obj);
+      catalogoAliasMap.set(String(alias).toLowerCase(), obj);
+      catalogoAliasMap.set(String(alias).toUpperCase(), obj);
+    }
+
     inventarioAdmin.push(obj);
   }
 
@@ -1809,7 +1845,7 @@ async function ensureCatalogoCargado(forceRefresh = false){
 
 // === Acciones de Ajustes: sincronizar y limpiar caché ===
 function __getInvGroupLastSync(){
-  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin];
+  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin, URLS.catalogoProductos];
   return Math.max(0, ...invUrls.map(u => __getLastSyncTsForUrl(u)));
 }
 
@@ -1834,7 +1870,7 @@ async function refreshInventoryNow(){
 }
 
 async function clearInventoryCache(){
-  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin];
+  const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin, URLS.catalogoProductos];
   for (const u of invUrls) {
     try { await __cacheDelete(u); } catch {}
   }
@@ -3021,6 +3057,139 @@ function cerrarModalProductos(){
   closeModal("modalProductos");
 }
 
+
+/* ================= MODAL BARCODE (ALIAS) ================= */
+let __barcodeHandled = false;
+
+function _setBarcodeStatus(html, show = true){
+  const st = el("barcodeStatus");
+  if (!st) return;
+  if (!show) {
+    st.classList.add("hidden");
+    st.innerHTML = "";
+    return;
+  }
+  st.classList.remove("hidden");
+  st.innerHTML = html;
+}
+
+function abrirModalBarcode(titulo = "Buscar por código de barras", subtitulo = "Escribe o escanea el código de barras (ALIAS).", onFound = null){
+  __barcodeHandled = false;
+
+  const t = el("barcodeTitle");
+  const s = el("barcodeSub");
+  if (t) t.textContent = titulo;
+  if (s) s.textContent = subtitulo;
+
+  const input = el("barcodeInput");
+  if (input) input.value = "";
+
+  // guardar callback
+  window.__barcodeOnFound = (typeof onFound === "function") ? onFound : null;
+
+  _setBarcodeStatus("", false);
+  openModal("modalBarcode");
+  setTimeout(() => el("barcodeInput")?.focus(), 50);
+}
+
+function cerrarModalBarcode(){
+  window.__barcodeOnFound = null;
+  closeModal("modalBarcode");
+}
+
+async function abrirBarcodeVendedor(){
+  try { await ensureCatalogoCargado(); } catch {}
+  abrirModalBarcode(
+    "Agregar por código de barras",
+    "Escribe o escanea el código de barras (ALIAS). Al encontrarlo, se abre el modal de cantidad/precio.",
+    (prod) => {
+      try { cerrarModalBarcode(); } catch {}
+      try { cerrarModalProductos(); } catch {}
+      abrirModalAgregarProducto(prod.codigo);
+      setTimeout(() => el("apCantidad")?.focus(), 60);
+    }
+  );
+}
+
+async function abrirBarcodeOperador(){
+  // desde el modal de búsqueda del operador (entradas/salidas/traslado/conteo)
+  try { await ensureCatalogoCargado(); } catch {}
+  abrirModalBarcode(
+    "Buscar por barras (Operador)",
+    "Escribe o escanea el código de barras (ALIAS). Al encontrarlo, se selecciona el producto automáticamente.",
+    (prod) => {
+      try { cerrarModalBarcode(); } catch {}
+      try { seleccionarProductoOperador(prod.codigo); } catch {}
+    }
+  );
+}
+
+async function abrirBarcodeAddMov(){
+  // desde el modal rápido "Agregar producto" (Operador)
+  try { await ensureCatalogoCargado(); } catch {}
+  abrirModalBarcode(
+    "Agregar por barras",
+    "Escribe o escanea el código de barras (ALIAS). Al encontrarlo, se llenará el producto y podrás ingresar la cantidad.",
+    (prod) => {
+      try { cerrarModalBarcode(); } catch {}
+      const codeEl = el("addMovCodigo");
+      const prodEl = el("addMovProducto");
+      if (codeEl) codeEl.value = prod.codigo;
+      if (prodEl) prodEl.value = prod.producto || "";
+      const sug = el("addMovSug");
+      if (sug) sug.innerHTML = "";
+      setTimeout(() => el("addMovQty")?.focus(), 60);
+    }
+  );
+}
+
+function onBarcodeInput(val){
+  if (__barcodeHandled) return;
+
+  const alias = normalizeAlias(val);
+  if (!alias) {
+    _setBarcodeStatus("", false);
+    return;
+  }
+
+  const prod = getProdByAlias(alias);
+
+  // Mostrar feedback (cuando ya hay varios dígitos)
+  if (!prod) {
+    if (alias.length >= 6) {
+      _setBarcodeStatus(`<b>No encontrado</b><div class="muted" style="margin-top:4px;">ALIAS: ${escapeHtml(alias)}</div>`, true);
+    } else {
+      _setBarcodeStatus("", false);
+    }
+    return;
+  }
+
+  _setBarcodeStatus(
+    `<b>${escapeHtml(prod.producto || "Producto")}</b>
+     <div class="muted" style="margin-top:4px;">Código: <b>${escapeHtml(prod.codigo)}</b>${prod.alias ? ` • Barras: <b>${escapeHtml(prod.alias)}</b>` : ""}</div>`,
+    true
+  );
+
+  __barcodeHandled = true;
+  setTimeout(() => {
+    try {
+      const fn = window.__barcodeOnFound;
+      if (typeof fn === "function") fn(prod);
+    } catch {}
+  }, 120);
+}
+
+const barcodeInput = el("barcodeInput");
+if (barcodeInput) {
+  barcodeInput.addEventListener("input", (e) => onBarcodeInput(e.target.value));
+  barcodeInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      try { cerrarModalBarcode(); } catch {}
+    }
+  });
+}
+
+
 function renderProductosModal(){
   const q = (el("buscarProductoModal").value || "").toLowerCase().trim();
   const cont = el("listaProductosModal");
@@ -3029,7 +3198,7 @@ function renderProductosModal(){
     cont.innerHTML = `
       <div class="card">
         <strong>Escribe para buscar productos…</strong>
-        <div class="muted">Ej: “clavo”, “01-0002”</div>
+        <div class="muted">Ej: “clavo”, “01-0002”, “7453078507354”</div>
       </div>
     `;
     return;
@@ -3038,7 +3207,8 @@ function renderProductosModal(){
   const encontrados = catalogo
     .filter(p =>
       (p.codigo || "").toLowerCase().includes(q) ||
-      (p.producto || "").toLowerCase().includes(q)
+      (p.producto || "").toLowerCase().includes(q) ||
+      (String(p.alias || "")).toLowerCase().includes(q)
     )
     .slice(0, 40);
 
@@ -3050,7 +3220,7 @@ function renderProductosModal(){
         <div class="ticket-top">
           <div>
             <div class="ticket-title">${escapeHtml(p.producto || "—")}</div>
-            <div class="ticket-sub">Código: <b>${escapeHtml(p.codigo)}</b></div>
+            <div class="ticket-sub">Código: <b>${escapeHtml(p.codigo)}</b>${p.alias ? ` • Barras: <b>${escapeHtml(p.alias)}</b>` : ""}</div>
           </div>
           <div class="ticket-total">Total: ${total}</div>
         </div>
@@ -5550,14 +5720,15 @@ function renderProductosOperadorModal(){
   const encontrados = catalogo
     .filter(p =>
       (p.producto || "").toLowerCase().includes(q) ||
-      (p.codigo || "").toLowerCase().includes(q)
+      (p.codigo || "").toLowerCase().includes(q) ||
+      (String(p.alias || "")).toLowerCase().includes(q)
     )
     .slice(0, 40);
 
   cont.innerHTML = encontrados.length ? encontrados.map(p => `
     <div class="list-item" onclick="seleccionarProductoOperador('${p.codigo}')">
       <div class="list-title">${escapeHtml(p.producto)}</div>
-      <div class="list-sub">Código: ${escapeHtml(p.codigo)} • ${isBodeguero() ? `A:${Number(p.stockA ?? 0)}` : `P:${Number(p.stockP ?? 0)} • A:${Number(p.stockA ?? 0)}`}</div>
+      <div class="list-sub">Código: ${escapeHtml(p.codigo)}${p.alias ? ` • Barras: ${escapeHtml(p.alias)}` : ""} • ${isBodeguero() ? `A:${Number(p.stockA ?? 0)}` : `P:${Number(p.stockP ?? 0)} • A:${Number(p.stockA ?? 0)}`}</div>
     </div>
   `).join("") : `<div class="list-item"><div class="list-title">No hay resultados</div></div>`;
 }
@@ -5604,6 +5775,7 @@ function seleccionarProductoOperador(codigo){
 
     cerrarModalProductosOperador();
     actualizarPreviewEntrada();
+    setTimeout(() => el("opQty_" + it.id)?.focus(), 60);
     return;
   }
 
@@ -5624,6 +5796,7 @@ function seleccionarProductoOperador(codigo){
 
     cerrarModalProductosOperador();
     actualizarPreviewSalida();
+    setTimeout(() => el("opSQty_" + it.id)?.focus(), 60);
     return;
   }
 
@@ -5664,6 +5837,7 @@ function seleccionarProductoOperador(codigo){
 
     cerrarModalProductosOperador();
     actualizarPreviewConteo();
+    setTimeout(() => el("opCQty_" + it.id)?.focus(), 60);
     return;
   }
 
