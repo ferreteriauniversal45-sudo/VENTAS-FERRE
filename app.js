@@ -9000,7 +9000,7 @@ function seleccionarCatVend(catEnc){
 
 let ceramicaDocs = JSON.parse(localStorage.getItem("ceramicaDocs") || "[]");
 let ceramicaDraft = null;
-let cerPickTargetId = null;
+let cerPickTarget = null;
 let cerPickTab = "TODAS";
 
 function __cerId(){
@@ -9034,6 +9034,70 @@ function __cerCategoria(p){
   return "";
 }
 
+
+function __parseCajaInfo(p){
+  // Intenta detectar piezas por caja / m² por caja desde producto/alias.
+  const raw = `${p?.producto || ""} ${p?.alias || ""}`.trim();
+
+  // Unidad sugerida (heurística simple)
+  let unidad = "PIEZA";
+  if (/(\bCAJA\b|\bCAJAS\b|\bCJA\b|\bBOX\b)/i.test(raw)) unidad = "CAJA";
+
+  // 1) Piezas por caja explícito (ej: "4 PZ", "4 PZS", "4 PIEZAS", "PZ/CAJA 4")
+  let ppc = 0;
+
+  let m = raw.match(/(?:PZ\s*\/\s*CAJA|PZS\s*\/\s*CAJA|PZAS\s*\/\s*CAJA)\s*(\d+(?:[\.,]\d+)?)/i);
+  if (!m) m = raw.match(/(\d+(?:[\.,]\d+)?)\s*(?:PZAS|PZS|PZ|PIEZAS)\b/i);
+  if (m) {
+    ppc = Number(String(m[1]).replace(",", ".")) || 0;
+  }
+
+  // 2) m² por caja (ej: "1.44M2", "1,44 m²")
+  let m2Caja = 0;
+  const m2m = raw.match(/(\d+(?:[\.,]\d+)?)\s*(?:M2|M²)\b/i);
+  if (m2m) {
+    m2Caja = Number(String(m2m[1]).replace(",", ".")) || 0;
+  }
+
+  return { unidad, ppc, m2Caja };
+}
+
+function __ppcFromM2(m2Caja, areaPieza){
+  const m2 = Number(m2Caja) || 0;
+  const ap = Number(areaPieza) || 0;
+  if (m2 <= 0 || ap <= 0) return 0;
+
+  const ratio = m2 / ap; // piezas por caja aproximado
+  if (!isFinite(ratio) || ratio <= 0) return 0;
+
+  // Si cae muy cerca de un entero, redondeamos; si no, usamos ceil por seguridad.
+  const near = Math.round(ratio);
+  if (near > 0 && Math.abs(ratio - near) / near <= 0.03) return near;
+  return Math.ceil(ratio);
+}
+
+function __maybeAutoPpc(it){
+  if (!it || !it.ppcAuto) return;
+
+  const w = Number(it.anchoCm) || 0;
+  const h = Number(it.altoCm) || 0;
+  const areaPieza = (w/100) * (h/100);
+  const m2Caja = Number(String(it.m2PorCaja || "").replace(",", ".")) || 0;
+
+  if (areaPieza <= 0 || m2Caja <= 0) return;
+
+  const ppc = __ppcFromM2(m2Caja, areaPieza);
+  if (ppc > 0) {
+    it.piezasPorCaja = String(ppc);
+    it.ppcHint = `Pz/Caja estimado desde ${__fmt2(m2Caja)} m²/caja`;
+
+    const inp = el("cerPPC_" + it.id);
+    if (inp) inp.value = String(ppc);
+    const hint = el("cerPpcHint_" + it.id);
+    if (hint) hint.textContent = it.ppcHint;
+  }
+}
+
 function __getCeramicas(){
   // inventarioAdmin ya está ordenado por producto
   return (Array.isArray(inventarioAdmin) ? inventarioAdmin : [])
@@ -9057,6 +9121,11 @@ function __newCerItem(){
     piezasPorCaja: "",
     inventarioUnidad: "PIEZA", // PIEZA | CAJA
 
+
+    // autodetección (opcional)
+    m2PorCaja: "",      // cuando el nombre/alias trae "1.44 m2"
+    ppcAuto: false,     // true si el sistema está ajustando Pz/Caja automáticamente
+    ppcHint: "",        // texto informativo debajo de Pz/Caja
     areaM2: "",
     tengoCant: ""
   };
@@ -9099,6 +9168,7 @@ function cerBack(){
   abrirConsultaInventarioVendedor();
 }
 
+
 function renderCeramicaCalcScreen(){
   headerTitle.textContent = "Cerámica";
   vendedorHome.classList.add("hidden");
@@ -9106,154 +9176,710 @@ function renderCeramicaCalcScreen(){
   contenido.classList.remove("hidden");
 
   if (!ceramicaDraft) ceramicaDraft = __newCerDoc();
+  ceramicaDraft.items = Array.isArray(ceramicaDraft.items) ? ceramicaDraft.items : [];
 
-  const items = Array.isArray(ceramicaDraft.items) ? ceramicaDraft.items : [];
+  const items = ceramicaDraft.items;
+
+  const listHtml = items.length
+    ? items.map((it, idx) => cerListItemHTML(it, idx)).join("")
+    : `
+      <div class="cer-empty">
+        <div class="t">No hay cálculos todavía</div>
+        <div class="muted">Crea un cálculo con el botón principal o usando una opción rápida.</div>
+        <div class="btn-row" style="margin-top:10px;">
+          <button type="button" onclick="cerOpenWizard()">➕ Crear mi primer cálculo</button>
+        </div>
+      </div>
+    `;
 
   contenido.innerHTML = `
-    <div class="cer-screen">
-      <div class="cer-topbar">
+    <div class="cer2">
+      <div class="cer2-head">
         <div class="left">
           <button type="button" class="secondary" onclick="cerBack()">⬅ Volver</button>
-          <div class="card-lite" style="margin:0;">
-            <div style="font-weight:900;">🧱 Cálculo de cerámica</div>
-            <div class="muted" style="margin-top:2px;">Agrega varios cálculos (diferentes tamaños) en una sola factura PDF.</div>
+          <div class="cer2-title">
+            <div class="h">🧱 Cálculo de cerámica</div>
+            <div class="muted">Flujo por pasos en modales. Menos campos en pantalla, más rapidez.</div>
           </div>
         </div>
 
         <div class="right">
           <button type="button" class="secondary" onclick="openCeramicaHistory()">🕘 Historial</button>
-          <button type="button" class="secondary" onclick="cerNuevo()">➕ Nuevo</button>
+          <button type="button" class="secondary" onclick="cerOpenMeta()">📄 PDF / Guardar</button>
         </div>
       </div>
 
-      <div class="card">
-        <strong>📌 Proyecto / Cliente</strong>
-        <div class="muted">Opcional (aparece en el PDF)</div>
-        <input id="cerTitulo" placeholder="Ej: Casa - Sala y Cocina (Carlos)" value="${escapeHtml(ceramicaDraft.titulo || "")}" oninput="cerSetTitulo(this.value)" />
+      <div class="cer2-grid">
+        <div class="card cer2-hero">
+          <button type="button" class="success cer-cta" onclick="cerOpenWizard()">➕ Nuevo cálculo</button>
+
+          <div class="cer-tiles">
+            <button type="button" class="secondary cer-tile" onclick="cerOpenWizard(null,{preset:'area'})">
+              <div class="t">📐 Calcular por m²</div>
+              <div class="d">Ingresa el área y obtén piezas/cajas necesarias.</div>
+            </button>
+
+            <button type="button" class="secondary cer-tile" onclick="cerOpenWizard(null,{preset:'room'})">
+              <div class="t">🏠 Por habitación</div>
+              <div class="d">Usa Largo × Ancho para calcular m² rápidamente.</div>
+            </button>
+
+            <button type="button" class="secondary cer-tile" onclick="cerOpenWizard(null,{preset:'stock'})">
+              <div class="t">📦 Con lo que tengo</div>
+              <div class="d">Calcula cuántos m² cubres con tu stock.</div>
+            </button>
+
+            <button type="button" class="secondary cer-tile" onclick="cerDuplicateLast()">
+              <div class="t">⧉ Duplicar último</div>
+              <div class="d">Reusa el cálculo anterior y ajusta lo necesario.</div>
+            </button>
+          </div>
+
+          <div class="cer-meta-row">
+            <div class="chipline">PDF: <b id="cerPdfTitle">${escapeHtml(ceramicaDraft.titulo || "Sin título")}</b></div>
+            <button type="button" class="secondary small" onclick="cerOpenMeta()">Editar</button>
+          </div>
+
+          <div id="cerSummary" class="cer-kpis"></div>
+        </div>
+
+        <div class="card">
+          <div class="cer-list-head">
+            <div>
+              <strong>📋 Mis cálculos</strong>
+              <div class="muted" style="margin-top:2px;">Cada tarjeta se edita desde el modal por pasos.</div>
+            </div>
+
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button type="button" class="secondary small" onclick="cerOpenWizard()">➕ Agregar</button>
+              <button type="button" class="secondary small" onclick="cerClearAllItems()">🗑️ Limpiar</button>
+            </div>
+          </div>
+
+          <div class="cer-list" id="cerItemsList">
+            ${listHtml}
+          </div>
+        </div>
       </div>
 
-      <div id="cerSummary" class="cer-kpis"></div>
-
-      <div class="cer-items">
-        ${items.map((it, idx) => cerItemHTML(it, idx)).join("")}
-      </div>
-
-      <div class="cer-actionsbar">
+      <div class="cer2-bottom">
         <div class="btn-row">
-          <button type="button" class="secondary" onclick="cerAddItem()">➕ Agregar cálculo</button>
-          <button type="button" onclick="cerSaveDoc()">💾 Guardar</button>
+          <button type="button" class="secondary" onclick="cerSaveDoc()">💾 Guardar</button>
           <button type="button" class="success" onclick="cerExportPdf()">📄 PDF (Compartir)</button>
         </div>
       </div>
     </div>
   `;
 
-  // pintar resúmenes
   cerRefreshSummary();
-  for (const it of items) cerRefreshItem(it.id);
 }
 
-function cerItemHTML(it, idx){
-  const title = `Cálculo ${idx+1}`;
-  const picked = it.cerNombre ? `
-    <div class="muted" style="margin-top:2px;">
-      <span class="cer-badge">${escapeHtml(it.cerCategoria || "CERÁMICA")}</span>
-      <span style="margin-left:6px;"><b>${escapeHtml(it.cerNombre)}</b></span>
-      <span style="margin-left:6px;">• Stock: <b>${__fmtInt(it.stockTotal)}</b></span>
-    </div>
-  ` : `<div class="muted" style="margin-top:2px;">Elige una cerámica para usar tu stock (opcional).</div>`;
 
-  const modeAreaActive = it.modo === "AREA" ? "active" : "";
-  const modeTengoActive = it.modo === "TENGO" ? "active" : "";
+function cerListItemHTML(it, idx){
+  const title = `Cálculo ${idx+1}`;
+  const res = cerCompute(it);
+
+  const prodLine = it.cerNombre
+    ? `<div class="meta"><span class="cer-badge">${escapeHtml(it.cerCategoria || "CERÁMICA")}</span>
+         <span style="margin-left:6px;"><b>${escapeHtml(it.cerNombre)}</b></span>
+       </div>`
+    : `<div class="meta">Sin cerámica seleccionada</div>`;
+
+  const id = escapeHtml(it.id);
+
+  const sizeTxt = `${__fmtInt(it.anchoCm)}×${__fmtInt(it.altoCm)} cm`;
+  const unidad = (it.inventarioUnidad === "CAJA") ? "CAJA" : "PIEZA";
+  const ppc = Number(String(it.piezasPorCaja || "").replace(",", ".")) || 0;
+
+  const cfg = `
+    <div class="meta">
+      Tamaño: <b>${escapeHtml(sizeTxt)}</b> • Desperdicio: <b>${__fmtInt(it.desperdicioPct || 0)}%</b> • Inventario: <b>${escapeHtml(unidad)}</b>
+      ${ppc>0 ? ` • Pz/Caja: <b>${__fmtInt(ppc)}</b>` : ""}
+      • Modo: <b>${escapeHtml(it.modo === "TENGO" ? "TENGO" : "ÁREA")}</b>
+      ${it.cerNombre ? ` • Stock: <b>${__fmtInt(it.stockTotal || 0)}</b>` : ""}
+    </div>
+  `;
+
+  let big = "";
+  let sub = "";
+  let hint = "";
+
+  if (!res.ok) {
+    big = "⚠️ Completa datos";
+    sub = res.msg || "Faltan campos.";
+    hint = "";
+  } else if (res.modo === "AREA") {
+    big = `${__fmtInt(res.piezas)} pzs${(res.ppc>0 ? ` • ${__fmtInt(res.cajas)} cajas` : "")}`;
+    sub = `Área con merma: ${__fmt2(res.areaConMerma)} m² (base: ${__fmt2(res.area)} m²)`;
+    hint = (res.faltanPiezas > 0)
+      ? `🛒 Comprar: ${__fmtInt(res.faltanPiezas)} pzs${(res.ppc>0 ? ` (≈ ${__fmtInt(res.faltanCajas)} cajas)` : "")}`
+      : "✅ Tu stock alcanza";
+  } else {
+    big = `~ ${__fmt2(res.areaConMerma)} m²`;
+    sub = `Sin merma: ${__fmt2(res.areaSinMerma)} m² • Unidad: ${escapeHtml(res.unidad)}`;
+    hint = `Pieza: ${__fmt2(res.areaPieza)} m²`;
+  }
 
   return `
-    <div class="cer-item" id="cerItem_${it.id}">
-      <div class="cer-item-head">
+    <div class="cer-list-item" id="cerRow_${id}">
+      <div class="cer-card-min">
         <div>
-          <div class="title">${title}</div>
-          <div id="cerProd_${it.id}">${picked}</div>
+          <div class="title">${escapeHtml(title)}</div>
+          ${prodLine}
+          <div class="big" style="margin-top:8px;">${escapeHtml(big)}</div>
+          <div class="sub">${escapeHtml(sub)}</div>
+          ${hint ? `<div class="muted" style="margin-top:6px; font-weight:900;">${escapeHtml(hint)}</div>` : ""}
         </div>
+
         <div class="actions">
-          <button type="button" class="icon-btn" title="Duplicar" onclick="cerDuplicateItem('${it.id}')">⧉</button>
-          <button type="button" class="icon-btn" title="Eliminar" onclick="cerRemoveItem('${it.id}')">🗑️</button>
+          <button type="button" class="secondary small" onclick="cerOpenWizard('${id}')">Editar</button>
+          <button type="button" class="icon-btn" title="Duplicar" onclick="cerDuplicateItem('${id}')">⧉</button>
+          <button type="button" class="icon-btn" title="Eliminar" onclick="cerRemoveItem('${id}')">🗑️</button>
         </div>
       </div>
 
-      <div class="cer-item-body">
-        <button type="button" onclick="openPickCeramica('${it.id}')">🏷️ Elegir cerámica</button>
-
-        <div class="cer-grid">
-          <div>
-            <label class="muted" style="display:block; font-weight:900; margin-bottom:6px;">📏 Tamaño de pieza (cm)</label>
-            <div class="cer-grid" style="grid-template-columns: 1fr 1fr;">
-              <input id="cerW_${it.id}" inputmode="decimal" placeholder="Ancho" value="${escapeHtml(it.anchoCm)}" oninput="cerSet('${it.id}','anchoCm', this.value)" />
-              <input id="cerH_${it.id}" inputmode="decimal" placeholder="Alto" value="${escapeHtml(it.altoCm)}" oninput="cerSet('${it.id}','altoCm', this.value)" />
-            </div>
-            <div class="cer-chips" style="margin-top:8px;">
-              <button type="button" class="chip" onclick="cerPresetSize('${it.id}',30,30)">30×30</button>
-              <button type="button" class="chip" onclick="cerPresetSize('${it.id}',45,45)">45×45</button>
-              <button type="button" class="chip" onclick="cerPresetSize('${it.id}',60,60)">60×60</button>
-              <button type="button" class="chip" onclick="cerPresetSize('${it.id}',20,60)">20×60</button>
-            </div>
-          </div>
-
-          <div>
-            <label class="muted" style="display:block; font-weight:900; margin-bottom:6px;">📦 Caja / Inventario</label>
-            <input id="cerPPC_${it.id}" inputmode="numeric" placeholder="Piezas por caja (opcional)" value="${escapeHtml(it.piezasPorCaja)}" oninput="cerSet('${it.id}','piezasPorCaja', this.value)" />
-            <div class="cer-seg" style="margin-top:8px;">
-              <button type="button" class="${it.inventarioUnidad==='PIEZA'?'active':''}" onclick="cerSet('${it.id}','inventarioUnidad','PIEZA')">Inventario en PIEZA</button>
-              <button type="button" class="${it.inventarioUnidad==='CAJA'?'active':''}" onclick="cerSet('${it.id}','inventarioUnidad','CAJA')">Inventario en CAJA</button>
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <label class="muted" style="display:block; font-weight:900; margin-bottom:6px;">🎯 ¿Qué quieres calcular?</label>
-          <div class="cer-seg">
-            <button type="button" class="${modeAreaActive}" onclick="cerSet('${it.id}','modo','AREA')">Necesito para m²</button>
-            <button type="button" class="${modeTengoActive}" onclick="cerSet('${it.id}','modo','TENGO')">¿Cuánto cubro con lo que tengo?</button>
-          </div>
-        </div>
-
-        <div class="cer-grid">
-          <div>
-            <label class="muted" style="display:block; font-weight:900; margin-bottom:6px;">🧮 ${it.modo==='AREA'?'Área a cubrir (m²)':'Cantidad que tengo'}</label>
-            ${it.modo==='AREA'
-              ? `<input id="cerArea_${it.id}" inputmode="decimal" placeholder="Ej: 14" value="${escapeHtml(it.areaM2)}" oninput="cerSet('${it.id}','areaM2', this.value)" />`
-              : `<input id="cerTengo_${it.id}" inputmode="decimal" placeholder="Ej: 20" value="${escapeHtml(it.tengoCant)}" oninput="cerSet('${it.id}','tengoCant', this.value)" />`
-            }
-            <div class="muted" style="margin-top:4px;">
-              ${it.modo==='AREA' ? 'Puedes escribir 14, 14.5, etc.' : `Unidad: <b>${it.inventarioUnidad}</b>`}
-            </div>
-          </div>
-
-          <div>
-            <label class="muted" style="display:block; font-weight:900; margin-bottom:6px;">🧯 Desperdicio (%)</label>
-            <input id="cerWaste_${it.id}" type="range" min="0" max="25" step="1" value="${escapeHtml(it.desperdicioPct)}" oninput="cerSet('${it.id}','desperdicioPct', this.value)" />
-            <div class="cer-row" style="justify-content:space-between; margin-top:4px;">
-              <div class="muted">0%</div>
-              <div><b id="cerWasteLbl_${it.id}">${escapeHtml(it.desperdicioPct)}%</b></div>
-              <div class="muted">25%</div>
-            </div>
-            <div class="cer-chips" style="margin-top:8px;">
-              <button type="button" class="chip" onclick="cerSet('${it.id}','desperdicioPct',5)">5%</button>
-              <button type="button" class="chip" onclick="cerSet('${it.id}','desperdicioPct',10)">10%</button>
-              <button type="button" class="chip" onclick="cerSet('${it.id}','desperdicioPct',12)">12%</button>
-              <button type="button" class="chip" onclick="cerSet('${it.id}','desperdicioPct',15)">15%</button>
-            </div>
-          </div>
-        </div>
-
-        <div id="cerRes_${it.id}" class="cer-result"></div>
-      </div>
+      <details style="margin-top:10px;">
+        <summary class="muted" style="cursor:pointer; font-weight:900;">Detalles</summary>
+        <div style="margin-top:8px;">${cfg}</div>
+      </details>
     </div>
   `;
 }
 
+
+/* ================= WIZARD (MODAL) ================= */
+
+let cerWizardState = null; // { step, isNew, itemId, item }
+
+function cerOpenWizard(itemId, opts){
+  // Compatibilidad: si el primer parámetro es un objeto, es opts
+  let _itemId = itemId;
+  let _opts = opts || {};
+  if (_itemId && typeof _itemId === "object") {
+    _opts = _itemId || {};
+    _itemId = null;
+  }
+
+  if (!ceramicaDraft) ceramicaDraft = __newCerDoc();
+  ceramicaDraft.items = Array.isArray(ceramicaDraft.items) ? ceramicaDraft.items : [];
+
+  let isNew = true;
+  let item;
+
+  if (_itemId) {
+    const it = cerFind(_itemId);
+    if (!it) return;
+    item = JSON.parse(JSON.stringify(it));
+    item.id = String(it.id);
+    isNew = false;
+  } else {
+    item = __newCerItem();
+    isNew = true;
+  }
+
+  cerWizardState = {
+    step: 1,
+    isNew,
+    itemId: String(item.id),
+    item,
+    openDims: false
+  };
+
+  // Presets rápidos (solo para "nuevo")
+  if (isNew && _opts && _opts.preset) {
+    const p = String(_opts.preset || "");
+    if (p === "area") {
+      item.modo = "AREA";
+      cerWizardState.step = 4;
+    } else if (p === "room") {
+      item.modo = "AREA";
+      cerWizardState.step = 4;
+      cerWizardState.openDims = true;
+    } else if (p === "stock") {
+      item.modo = "TENGO";
+      cerWizardState.step = 4;
+    }
+  }
+
+  cerWizRender();
+  openModal("modalCerWizard");
+}
+
+
+
+function cerOpenWizardPrefill(prefill){
+  if (!ceramicaDraft) ceramicaDraft = __newCerDoc();
+  ceramicaDraft.items = Array.isArray(ceramicaDraft.items) ? ceramicaDraft.items : [];
+
+  const item = JSON.parse(JSON.stringify(prefill || __newCerItem()));
+  item.id = __cerId();
+
+  cerWizardState = {
+    step: 1,
+    isNew: true,
+    itemId: String(item.id),
+    item
+  };
+
+  cerWizRender();
+  openModal("modalCerWizard");
+}
+
+function cerWizClose(){
+  cerWizardState = null;
+  closeModal("modalCerWizard");
+}
+
+function cerWizError(msg){
+  const box = el("cerWizError");
+  if (!box) return;
+  box.style.display = msg ? "block" : "none";
+  box.textContent = msg ? String(msg) : "";
+}
+
+function cerWizGo(step){
+  if (!cerWizardState) return;
+  const s = Math.max(1, Math.min(5, Number(step) || 1));
+  cerWizardState.step = s;
+  cerWizError("");
+  cerWizRender();
+}
+
+function cerWizPrev(){
+  if (!cerWizardState) return;
+  cerWizError("");
+  cerWizardState.step = Math.max(1, (cerWizardState.step || 1) - 1);
+  cerWizRender();
+}
+
+function cerWizNext(){
+  if (!cerWizardState) return;
+  cerWizError("");
+
+  const ok = cerWizValidateStep(cerWizardState.step);
+  if (!ok.ok) {
+    cerWizError(ok.msg || "Revisa los datos.");
+    return;
+  }
+
+  cerWizardState.step = Math.min(5, (cerWizardState.step || 1) + 1);
+  cerWizRender();
+}
+
+function cerWizValidateStep(step){
+  const it = cerWizardState?.item;
+  if (!it) return { ok:false, msg:"No hay datos." };
+
+  const w = Number(it.anchoCm) || 0;
+  const h = Number(it.altoCm) || 0;
+  const areaPieza = (w/100) * (h/100);
+
+  if (Number(step) >= 2) {
+    if (!areaPieza || areaPieza <= 0) return { ok:false, msg:"Ingresa el tamaño de la pieza (cm)." };
+  }
+
+  const unidad = (it.inventarioUnidad === "CAJA") ? "CAJA" : "PIEZA";
+  const ppc = Number(String(it.piezasPorCaja || "").replace(",", ".")) || 0;
+  if (Number(step) >= 3) {
+    if (unidad === "CAJA" && ppc <= 0) return { ok:false, msg:"Inventario en CAJA: ingresa Pz/Caja o cambia a PIEZA." };
+  }
+
+  if (Number(step) >= 4) {
+    if (it.modo === "TENGO") {
+      const tengo = Number(String(it.tengoCant || "").replace(",", ".")) || 0;
+      if (tengo <= 0) return { ok:false, msg:"Ingresa cuánta cerámica tienes." };
+    } else {
+      const area = Number(String(it.areaM2 || "").replace(",", ".")) || 0;
+      if (area <= 0) return { ok:false, msg:"Ingresa el área (m²)." };
+    }
+  }
+
+  return { ok:true };
+}
+
+function cerWizSet(field, value){
+  const it = cerWizardState?.item;
+  if (!it) return;
+
+  if (field === "modo") {
+    it.modo = (value === "TENGO") ? "TENGO" : "AREA";
+    cerWizRender();
+    return;
+  }
+
+  if (field === "inventarioUnidad") {
+    it.inventarioUnidad = (value === "CAJA") ? "CAJA" : "PIEZA";
+    cerWizRender();
+    return;
+  }
+
+  if (field === "anchoCm" || field === "altoCm") {
+    it[field] = Number(String(value || "").replace(",", ".")) || 0;
+    __maybeAutoPpc(it);
+    cerWizRefreshLive();
+    return;
+  }
+
+  if (field === "desperdicioPct") {
+    it.desperdicioPct = Math.max(0, Math.min(25, Number(value) || 0));
+    cerWizRefreshLive();
+    return;
+  }
+
+  if (field === "piezasPorCaja") {
+    it.piezasPorCaja = String(value || "").trim();
+    it.ppcAuto = false;
+    it.ppcHint = it.piezasPorCaja ? "Pz/Caja definido manualmente." : "";
+    cerWizRefreshLive();
+    return;
+  }
+
+  if (field === "areaM2") {
+    it.areaM2 = String(value || "").trim();
+    cerWizRefreshLive();
+    return;
+  }
+
+  if (field === "tengoCant") {
+    it.tengoCant = String(value || "").trim();
+    cerWizRefreshLive();
+    return;
+  }
+}
+
+function cerWizPreset(w, h){
+  const it = cerWizardState?.item;
+  if (!it) return;
+
+  it.anchoCm = Number(w) || 0;
+  it.altoCm = Number(h) || 0;
+  __maybeAutoPpc(it);
+  cerWizRender();
+}
+
+function cerWizClearProduct(){
+  const it = cerWizardState?.item;
+  if (!it) return;
+
+  it.cerCodigo = "";
+  it.cerNombre = "";
+  it.cerAlias = "";
+  it.cerCategoria = "";
+  it.stockTotal = 0;
+  it.m2PorCaja = "";
+  it.ppcAuto = false;
+  it.ppcHint = "";
+
+  cerWizRender();
+}
+
+function cerWizOpenPick(){
+  if (!cerWizardState?.item) return;
+  openPickCeramicaWizard();
+}
+
+function cerWizCalcAreaFromDims(){
+  const l = Number(String(el("cerWizLen")?.value || "").replace(",", ".")) || 0;
+  const a = Number(String(el("cerWizWid")?.value || "").replace(",", ".")) || 0;
+  if (l <= 0 || a <= 0) {
+    cerWizError("Ingresa largo y ancho (m).");
+    return;
+  }
+  const m2 = l * a;
+  cerWizError("");
+  cerWizardState.item.areaM2 = String(__fmt2(m2));
+  const inp = el("cerWizArea");
+  if (inp) inp.value = cerWizardState.item.areaM2;
+  cerWizRefreshLive();
+}
+
+function cerWizRender(){
+  const it = cerWizardState?.item;
+  if (!it) return;
+
+  const step = Number(cerWizardState.step) || 1;
+
+  const title = cerWizardState.isNew ? "🧱 Nuevo cálculo" : "🧱 Editar cálculo";
+  const tEl = el("cerWizTitle");
+  if (tEl) tEl.textContent = title;
+
+  const steps = [
+    { n:1, t:"Cerámica" },
+    { n:2, t:"Tamaño" },
+    { n:3, t:"Caja" },
+    { n:4, t:"Objetivo" },
+    { n:5, t:"Resultado" },
+  ];
+
+  const stepper = el("cerWizStepper");
+  if (stepper) {
+    stepper.innerHTML = steps.map(s =>
+      `<button type="button" class="chip ${s.n===step?'active':''}" onclick="cerWizGo(${s.n})">${s.n}. ${escapeHtml(s.t)}</button>`
+    ).join("");
+  }
+
+  const body = el("cerWizBody");
+  if (!body) return;
+
+  // footer buttons
+  const prevBtn = el("cerWizPrevBtn");
+  const nextBtn = el("cerWizNextBtn");
+  const saveBtn = el("cerWizSaveBtn");
+
+  if (prevBtn) prevBtn.disabled = (step <= 1);
+  if (nextBtn) nextBtn.style.display = (step >= 5) ? "none" : "inline-block";
+  if (saveBtn) saveBtn.style.display = (step >= 5) ? "inline-block" : "none";
+
+  // Render step body
+  if (step === 1) {
+    const prodCard = it.cerNombre ? `
+      <div class="card-lite">
+        <div style="font-weight:900;">${escapeHtml(it.cerNombre)}</div>
+        <div class="muted" style="margin-top:2px;">
+          <span class="cer-badge">${escapeHtml(it.cerCategoria || "CERÁMICA")}</span>
+          <span style="margin-left:6px;">Código: <b>${escapeHtml(it.cerCodigo || "-")}</b></span>
+          ${it.cerAlias ? `<span style="margin-left:6px;">Alias: <b>${escapeHtml(it.cerAlias)}</b></span>` : ""}
+        </div>
+        <div class="muted" style="margin-top:6px;">Stock total: <b>${__fmtInt(it.stockTotal || 0)}</b></div>
+        ${it.ppcHint ? `<div class="muted" style="margin-top:6px;">${escapeHtml(it.ppcHint)}</div>` : ""}
+      </div>
+    ` : `
+      <div class="card-lite">
+        <div style="font-weight:900;">Sin cerámica seleccionada</div>
+        <div class="muted" style="margin-top:2px;">Puedes calcular solo por medidas. Si eliges una cerámica, se toma el stock para la recomendación.</div>
+      </div>
+    `;
+
+    body.innerHTML = `
+      ${prodCard}
+      <div class="btn-row">
+        <button type="button" onclick="cerWizOpenPick()">🏷️ Elegir del inventario</button>
+        <button type="button" class="secondary" onclick="cerWizClearProduct()">Quitar</button>
+      </div>
+      <div class="muted">Tip: si el nombre trae “4 PZ” o “1.44 m²”, se detecta Pz/Caja automáticamente.</div>
+    `;
+  }
+
+  if (step === 2) {
+    const areaPieza = (Number(it.anchoCm)||0)/100 * (Number(it.altoCm)||0)/100;
+    body.innerHTML = `
+      <div class="card-lite">
+        <div style="font-weight:900;">📏 Tamaño de pieza (cm)</div>
+        <div class="muted" style="margin-top:2px;">Usa presets o escribe el tamaño.</div>
+
+        <div class="cer-wiz-grid" style="margin-top:10px;">
+          <div>
+            <label class="label">Ancho (cm)</label>
+            <input id="cerWizW" inputmode="decimal" value="${escapeHtml(it.anchoCm)}" oninput="cerWizSet('anchoCm', this.value)" />
+          </div>
+          <div>
+            <label class="label">Alto (cm)</label>
+            <input id="cerWizH" inputmode="decimal" value="${escapeHtml(it.altoCm)}" oninput="cerWizSet('altoCm', this.value)" />
+          </div>
+        </div>
+
+        <div class="cer-chips" style="margin-top:10px;">
+          <button type="button" class="chip" onclick="cerWizPreset(30,30)">30×30</button>
+          <button type="button" class="chip" onclick="cerWizPreset(45,45)">45×45</button>
+          <button type="button" class="chip" onclick="cerWizPreset(60,60)">60×60</button>
+          <button type="button" class="chip" onclick="cerWizPreset(20,60)">20×60</button>
+        </div>
+
+        <div class="cer-mini-kpi" style="margin-top:10px;">
+          <div class="muted">Área por pieza</div>
+          <div><b id="cerWizAreaPieza">${__fmt2(areaPieza || 0)}</b> m²</div>
+        </div>
+      </div>
+    `;
+  }
+
+  if (step === 3) {
+    const unidad = (it.inventarioUnidad === "CAJA") ? "CAJA" : "PIEZA";
+    const ppc = Number(String(it.piezasPorCaja || "").replace(",", ".")) || 0;
+    const warn = (unidad === "CAJA" && ppc <= 0)
+      ? `<div class="cer-wiz-error" style="display:block; margin-top:10px;">Inventario en CAJA: ingresa Pz/Caja para calcular correctamente.</div>`
+      : "";
+
+    body.innerHTML = `
+      <div class="card-lite">
+        <div style="font-weight:900;">📦 Caja / Inventario</div>
+        <div class="muted" style="margin-top:2px;">Define en qué unidad está tu stock y cuántas piezas trae cada caja.</div>
+
+        <div class="cer-seg" style="margin-top:10px;">
+          <button type="button" class="${unidad==='PIEZA'?'active':''}" onclick="cerWizSet('inventarioUnidad','PIEZA')">Inventario en PIEZA</button>
+          <button type="button" class="${unidad==='CAJA'?'active':''}" onclick="cerWizSet('inventarioUnidad','CAJA')">Inventario en CAJA</button>
+        </div>
+
+        <label class="label" style="margin-top:10px;">Piezas por caja (Pz/Caja)</label>
+        <input id="cerWizPPC" inputmode="numeric" placeholder="Ej: 4" value="${escapeHtml(it.piezasPorCaja)}" oninput="cerWizSet('piezasPorCaja', this.value)" />
+        <div class="muted" id="cerWizPpcHint" style="margin-top:4px;">${escapeHtml(it.ppcHint || "")}</div>
+
+        ${warn}
+      </div>
+    `;
+  }
+
+  if (step === 4) {
+    const isArea = it.modo !== "TENGO";
+    body.innerHTML = `
+      <div class="card-lite">
+        <div style="font-weight:900;">🎯 ¿Qué quieres calcular?</div>
+
+        <div class="cer-seg" style="margin-top:10px;">
+          <button type="button" class="${isArea?'active':''}" onclick="cerWizSet('modo','AREA')">Necesito para m²</button>
+          <button type="button" class="${!isArea?'active':''}" onclick="cerWizSet('modo','TENGO')">¿Cuánto cubro con lo que tengo?</button>
+        </div>
+
+        ${isArea ? `
+          <label class="label" style="margin-top:10px;">Área a cubrir (m²)</label>
+          <input id="cerWizArea" inputmode="decimal" placeholder="Ej: 14" value="${escapeHtml(it.areaM2)}" oninput="cerWizSet('areaM2', this.value)" />
+
+          <details style="margin-top:10px;" ${cerWizardState?.openDims ? "open" : ""}>
+            <summary class="muted" style="cursor:pointer; font-weight:900;">Calcular m² por medidas (Largo × Ancho)</summary>
+            <div class="cer-wiz-grid" style="margin-top:10px;">
+              <div>
+                <label class="label">Largo (m)</label>
+                <input id="cerWizLen" inputmode="decimal" placeholder="Ej: 4.5" />
+              </div>
+              <div>
+                <label class="label">Ancho (m)</label>
+                <input id="cerWizWid" inputmode="decimal" placeholder="Ej: 3.2" />
+              </div>
+            </div>
+            <div class="btn-row" style="margin-top:10px;">
+              <button type="button" class="secondary" onclick="cerWizCalcAreaFromDims()">Calcular y usar</button>
+            </div>
+          </details>
+        ` : `
+          <label class="label" style="margin-top:10px;">Cantidad que tienes (${escapeHtml(it.inventarioUnidad === "CAJA" ? "CAJAS" : "PIEZAS")})</label>
+          <input id="cerWizTengo" inputmode="decimal" placeholder="Ej: 20" value="${escapeHtml(it.tengoCant)}" oninput="cerWizSet('tengoCant', this.value)" />
+          <div class="muted" style="margin-top:4px;">Unidad: <b>${escapeHtml(it.inventarioUnidad === "CAJA" ? "CAJA" : "PIEZA")}</b></div>
+        `}
+      </div>
+    `;
+  }
+
+  if (step === 5) {
+    const res = cerCompute(it);
+
+    let resHtml = "";
+    if (!res.ok) {
+      resHtml = `<b>⚠️ ${escapeHtml(res.msg || "Completa los datos.")}</b>`;
+    } else if (res.modo === "AREA") {
+      resHtml = `
+        <div><b>✅ Necesitas:</b> ${__fmtInt(res.piezas)} piezas${(res.ppc>0?` • ${__fmtInt(res.cajas)} cajas`:"")}</div>
+        <div class="muted">Pieza: ${__fmt2(res.areaPieza)} m² • Área con merma: ${__fmt2(res.areaConMerma)} m²</div>
+        <div style="margin-top:6px;"><b>🛒 Recomendación:</b> ${res.faltanPiezas>0 ? `Comprar ${__fmtInt(res.faltanPiezas)} piezas${(res.ppc>0?` (~${__fmtInt(res.faltanCajas)} cajas)`:"")}` : "Tu stock alcanza ✅"}</div>
+      `;
+    } else {
+      resHtml = `
+        <div><b>✅ Con lo que tienes:</b> cubres ~ <span style="font-size:18px; font-weight:900;">${__fmt2(res.areaConMerma)}</span> m²</div>
+        <div class="muted">Sin merma: ${__fmt2(res.areaSinMerma)} m² • Pieza: ${__fmt2(res.areaPieza)} m² • Unidad: ${escapeHtml(res.unidad)}</div>
+      `;
+    }
+
+    body.innerHTML = `
+      <div class="card-lite">
+        <div style="font-weight:900;">🧯 Desperdicio</div>
+        <input id="cerWizWaste" type="range" min="0" max="25" step="1" value="${escapeHtml(it.desperdicioPct)}" oninput="cerWizSet('desperdicioPct', this.value)" />
+        <div class="cer-row" style="justify-content:space-between; margin-top:4px;">
+          <div class="muted">0%</div>
+          <div><b id="cerWizWasteLbl">${escapeHtml(it.desperdicioPct)}%</b></div>
+          <div class="muted">25%</div>
+        </div>
+
+        <div class="cer-chips" style="margin-top:8px;">
+          <button type="button" class="chip" onclick="cerWizSet('desperdicioPct',5); el('cerWizWaste').value=5; el('cerWizWasteLbl').textContent='5%'; cerWizRefreshLive()">5%</button>
+          <button type="button" class="chip" onclick="cerWizSet('desperdicioPct',10); el('cerWizWaste').value=10; el('cerWizWasteLbl').textContent='10%'; cerWizRefreshLive()">10%</button>
+          <button type="button" class="chip" onclick="cerWizSet('desperdicioPct',12); el('cerWizWaste').value=12; el('cerWizWasteLbl').textContent='12%'; cerWizRefreshLive()">12%</button>
+          <button type="button" class="chip" onclick="cerWizSet('desperdicioPct',15); el('cerWizWaste').value=15; el('cerWizWasteLbl').textContent='15%'; cerWizRefreshLive()">15%</button>
+        </div>
+
+        <div class="res" id="cerWizResult" style="margin-top:10px;">${resHtml}</div>
+      </div>
+      <div class="muted">Guardar agregará este cálculo a la lista principal.</div>
+    `;
+  }
+
+  // refrescar métricas live si el step las necesita
+  cerWizRefreshLive();
+}
+
+function cerWizRefreshLive(){
+  const it = cerWizardState?.item;
+  if (!it) return;
+
+  // step 2: área por pieza
+  const areaPieza = (Number(it.anchoCm)||0)/100 * (Number(it.altoCm)||0)/100;
+  const ap = el("cerWizAreaPieza");
+  if (ap) ap.textContent = __fmt2(areaPieza || 0);
+
+  // step 3: hint
+  const hint = el("cerWizPpcHint");
+  if (hint) hint.textContent = String(it.ppcHint || "");
+
+  // step 5: waste label + result
+  const wl = el("cerWizWasteLbl");
+  if (wl) wl.textContent = `${__fmtInt(it.desperdicioPct || 0)}%`;
+
+  const resBox = el("cerWizResult");
+  if (resBox) {
+    const res = cerCompute(it);
+    if (!res.ok) {
+      resBox.innerHTML = `<b>⚠️ ${escapeHtml(res.msg || "Completa los datos.")}</b>`;
+    } else if (res.modo === "AREA") {
+      resBox.innerHTML = `
+        <div><b>✅ Necesitas:</b> ${__fmtInt(res.piezas)} piezas${(res.ppc>0?` • ${__fmtInt(res.cajas)} cajas`:"")}</div>
+        <div class="muted">Pieza: ${__fmt2(res.areaPieza)} m² • Área con merma: ${__fmt2(res.areaConMerma)} m²</div>
+        <div style="margin-top:6px;"><b>🛒 Recomendación:</b> ${res.faltanPiezas>0 ? `Comprar ${__fmtInt(res.faltanPiezas)} piezas${(res.ppc>0?` (~${__fmtInt(res.faltanCajas)} cajas)`:"")}` : "Tu stock alcanza ✅"}</div>
+      `;
+    } else {
+      resBox.innerHTML = `
+        <div><b>✅ Con lo que tienes:</b> cubres ~ <span style="font-size:18px; font-weight:900;">${__fmt2(res.areaConMerma)}</span> m²</div>
+        <div class="muted">Sin merma: ${__fmt2(res.areaSinMerma)} m² • Pieza: ${__fmt2(res.areaPieza)} m² • Unidad: ${escapeHtml(res.unidad)}</div>
+      `;
+    }
+  }
+}
+
+function cerWizSave(){
+  if (!cerWizardState) return;
+  cerWizError("");
+
+  // Validación completa
+  const ok = cerWizValidateStep(5);
+  if (!ok.ok) {
+    cerWizError(ok.msg || "Revisa los datos.");
+    return;
+  }
+
+  const it = cerWizardState.item;
+  if (!it) return;
+
+  // commit
+  if (cerWizardState.isNew) {
+    ceramicaDraft.items.push(it);
+  } else {
+    const target = cerFind(cerWizardState.itemId);
+    if (target) Object.assign(target, it);
+  }
+
+  cerWizardState = null;
+  closeModal("modalCerWizard");
+  renderCeramicaCalcScreen();
+}
 function cerSetTitulo(v){
   if (!ceramicaDraft) return;
   ceramicaDraft.titulo = String(v || "");
+
+  // Refrescar UI (panel y modal)
+  const lbl = el("cerPdfTitle");
+  if (lbl) lbl.textContent = ceramicaDraft.titulo || "Sin título";
+
+  const inp = el("cerMetaTitulo");
+  if (inp && inp.value !== ceramicaDraft.titulo) inp.value = ceramicaDraft.titulo;
 }
+
 
 function cerPresetSize(itemId, w, h){
   const it = cerFind(itemId);
@@ -9266,7 +9892,9 @@ function cerPresetSize(itemId, w, h){
   if (iw) iw.value = String(it.anchoCm);
   if (ih) ih.value = String(it.altoCm);
 
+  __maybeAutoPpc(it);
   cerRefreshItem(itemId);
+  cerRefreshSummary();
 }
 
 function cerFind(id){
@@ -9293,12 +9921,18 @@ function cerSet(itemId, field, value){
 
   if (field === "anchoCm" || field === "altoCm") {
     it[field] = Number(String(value||"").replace(",", ".")) || 0;
+    __maybeAutoPpc(it);
   } else if (field === "desperdicioPct") {
     it.desperdicioPct = Math.min(25, Math.max(0, Number(value)||0));
     const lbl = el("cerWasteLbl_"+itemId);
     if (lbl) lbl.textContent = `${it.desperdicioPct}%`;
   } else if (field === "piezasPorCaja") {
     it.piezasPorCaja = String(value || "").trim();
+    it.ppcAuto = false;
+    it.m2PorCaja = "";
+    it.ppcHint = "";
+    const hint = el("cerPpcHint_"+itemId);
+    if (hint) hint.textContent = "";
   } else if (field === "areaM2") {
     it.areaM2 = String(value || "").trim();
   } else if (field === "tengoCant") {
@@ -9312,34 +9946,81 @@ function cerSet(itemId, field, value){
 }
 
 function cerAddItem(){
-  if (!ceramicaDraft) ceramicaDraft = __newCerDoc();
-  ceramicaDraft.items = Array.isArray(ceramicaDraft.items) ? ceramicaDraft.items : [];
-  ceramicaDraft.items.push(__newCerItem());
-  renderCeramicaCalcScreen();
+  cerOpenWizard();
 }
 
 function cerRemoveItem(itemId){
-  if (!ceramicaDraft?.items || ceramicaDraft.items.length <= 1) {
-    alert("Debe existir al menos 1 cálculo.");
-    return;
-  }
+  if (!ceramicaDraft) ceramicaDraft = __newCerDoc();
+  ceramicaDraft.items = Array.isArray(ceramicaDraft.items) ? ceramicaDraft.items : [];
+
   ceramicaDraft.items = ceramicaDraft.items.filter(x => String(x?.id) !== String(itemId));
+
+  // Mantener al menos 1 cálculo
+  if (!ceramicaDraft.items.length) ceramicaDraft.items.push(__newCerItem());
+
   renderCeramicaCalcScreen();
 }
 
 function cerDuplicateItem(itemId){
   const it = cerFind(itemId);
   if (!it) return;
-  const copy = JSON.parse(JSON.stringify(it));
-  copy.id = __cerId();
-  ceramicaDraft.items.push(copy);
-  renderCeramicaCalcScreen();
+
+  // abrir wizard como "nuevo" con los mismos datos (sin afectar la lista hasta guardar)
+  cerOpenWizardPrefill(it);
 }
 
 function cerNuevo(){
   ceramicaDraft = __newCerDoc();
   renderCeramicaCalcScreen();
 }
+
+function cerOpenMeta(){
+  if (!ceramicaDraft) ceramicaDraft = __newCerDoc();
+  const inp = el("cerMetaTitulo");
+  if (inp) inp.value = ceramicaDraft.titulo || "";
+  openModal("modalCerMeta");
+}
+
+function cerResetDoc(){
+  const ok = confirm("¿Crear un documento nuevo? Se perderán cambios no guardados.");
+  if (!ok) return;
+  ceramicaDraft = __newCerDoc();
+  try { closeModal("modalCerMeta"); } catch {}
+  renderCeramicaCalcScreen();
+}
+
+function cerClearAllItems(){
+  if (!ceramicaDraft) return;
+  const items = Array.isArray(ceramicaDraft.items) ? ceramicaDraft.items : [];
+  if (!items.length) return;
+  const ok = confirm("¿Eliminar todos los cálculos de este documento?");
+  if (!ok) return;
+  ceramicaDraft.items = [];
+  renderCeramicaCalcScreen();
+}
+
+function cerDuplicateLast(){
+  if (!ceramicaDraft) ceramicaDraft = __newCerDoc();
+  ceramicaDraft.items = Array.isArray(ceramicaDraft.items) ? ceramicaDraft.items : [];
+  if (!ceramicaDraft.items.length) return cerOpenWizard();
+
+  const last = ceramicaDraft.items[ceramicaDraft.items.length - 1];
+  const copy = JSON.parse(JSON.stringify(last));
+  copy.id = __cerId();
+
+  cerWizardState = {
+    step: 5,
+    isNew: true,
+    itemId: String(copy.id),
+    item: copy,
+    openDims: false
+  };
+
+  cerWizRender();
+  openModal("modalCerWizard");
+}
+
+
 
 function cerCompute(it){
   const w = Number(it.anchoCm)||0;
@@ -9353,6 +10034,11 @@ function cerCompute(it){
 
   if (!areaPieza || areaPieza <= 0) {
     return { ok:false, msg:"Ingresa el tamaño de la pieza (cm).", areaPieza:0 };
+  }
+
+
+  if (unidad === "CAJA" && ppc <= 0) {
+    return { ok:false, msg:"Si tu inventario está en CAJA, ingresa Piezas por caja (Pz/Caja) o cambia a PIEZA.", areaPieza: areaPieza || 0 };
   }
 
   if (it.modo === "AREA") {
@@ -9472,6 +10158,9 @@ function cerRefreshItem(itemId){
       prodBox.innerHTML = `<div class="muted" style="margin-top:2px;">Elige una cerámica para usar tu stock (opcional).</div>`;
     }
   }
+
+  const hintEl = el("cerPpcHint_"+itemId);
+  if (hintEl) hintEl.textContent = String(it.ppcHint || "");
 }
 
 function cerRefreshSummary(){
@@ -9526,14 +10215,33 @@ function setCerPickTab(tab){
   renderPickCeramicaList();
 }
 
+
 function openPickCeramica(itemId){
-  cerPickTargetId = String(itemId || "");
-  if (!cerPickTargetId) return;
+  const id = String(itemId || "");
+  if (!id) return;
+
+  cerPickTarget = { type:"DOC", itemId: id };
 
   // asegurarnos que el catálogo está listo
   if (!catalogoCargado) {
     // no bloqueamos: igual abrimos y mostramos mensaje
   }
+
+  const s = el("pickCeramicaSearch");
+  if (s) {
+    s.value = "";
+    s.oninput = () => renderPickCeramicaList();
+    setTimeout(() => s.focus(), 50);
+  }
+
+  setCerPickTab("TODAS");
+  renderPickCeramicaList();
+  openModal("modalPickCeramica");
+}
+
+function openPickCeramicaWizard(){
+  if (!cerWizardState?.item) return;
+  cerPickTarget = { type:"WIZ" };
 
   const s = el("pickCeramicaSearch");
   if (s) {
@@ -9603,11 +10311,19 @@ function renderPickCeramicaList(){
   }).join("") + (items.length>max ? `<div class="muted" style="margin-top:8px;">Mostrando ${max} de ${items.length} resultados. Usa el buscador.</div>` : "");
 }
 
+
 function pickCeramica(codeEnc){
   const code = decodeURIComponent(codeEnc || "");
-  if (!cerPickTargetId) return;
+  if (!cerPickTarget) return;
 
-  const it = cerFind(cerPickTargetId);
+  let it = null;
+
+  if (cerPickTarget.type === "DOC") {
+    it = cerFind(cerPickTarget.itemId);
+  } else if (cerPickTarget.type === "WIZ") {
+    it = cerWizardState?.item || null;
+  }
+
   if (!it) return;
 
   const p = inventarioAdmin.find(x => String(x?.codigo) === String(code));
@@ -9619,9 +10335,44 @@ function pickCeramica(codeEnc){
   it.cerCategoria = __cerCategoria(p) || "CERÁMICA";
   it.stockTotal = Number(p.stockTotal || 0);
 
+  // Autodetección de unidad / Pz/Caja desde nombre/alias (si aplica)
+  try {
+    const info = __parseCajaInfo(p);
+
+    // Unidad sugerida (si la detectamos)
+    if (info?.unidad) it.inventarioUnidad = (info.unidad === "CAJA") ? "CAJA" : "PIEZA";
+
+    // Reset por defecto
+    it.ppcHint = "";
+    it.ppcAuto = false;
+    it.m2PorCaja = "";
+
+    if (info?.ppc > 0) {
+      it.piezasPorCaja = String(Math.round(info.ppc));
+      it.ppcHint = "Pz/Caja detectado automáticamente desde el nombre/alias.";
+
+    } else if (info?.m2Caja > 0) {
+      it.m2PorCaja = String(info.m2Caja);
+      it.ppcAuto = true;
+
+      // Si ya está el tamaño, estimamos Pz/Caja con base en m²/caja
+      __maybeAutoPpc(it);
+
+      if (!String(it.piezasPorCaja || "").trim()) {
+        it.ppcHint = `Detectado ${__fmt2(info.m2Caja)} m²/caja. Completa el tamaño para estimar Pz/Caja.`;
+      }
+    }
+  } catch(e){
+    console.warn(e);
+  }
+
   closeModal("modalPickCeramica");
-  cerRefreshItem(cerPickTargetId);
-  cerRefreshSummary();
+
+  if (cerPickTarget.type === "WIZ") {
+    cerWizRender();
+  } else {
+    renderCeramicaCalcScreen();
+  }
 }
 
 /* --- Guardar / Historial --- */
@@ -9733,6 +10484,11 @@ async function autoShareLastFile(){
 async function cerExportPdf(){
   if (!ceramicaDraft) return;
 
+  if (!Array.isArray(ceramicaDraft.items) || !ceramicaDraft.items.length) {
+    alert("Agrega al menos 1 cálculo.");
+    return;
+  }
+
   // Guardar antes de exportar (práctico para reusar)
   try { cerSaveDoc(); } catch {}
 
@@ -9744,6 +10500,7 @@ async function cerExportPdf(){
     alert("❌ No se pudo generar el PDF.");
   }
 }
+
 
 async function crearPdfCeramica(docData){
   const pkg = window.jspdf || {};
