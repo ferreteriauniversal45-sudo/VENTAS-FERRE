@@ -702,6 +702,43 @@
   </div>
 </div>
 
+
+<!-- ================= ADMIN: CERÁMICA ================= -->
+<div id="modalPickCeramica" class="modal">
+  <div class="modal-card cer-pick">
+    <div class="cer-pick-head">
+      <h3>🧱 Elegir cerámica</h3>
+      <button type="button" class="icon-btn" onclick="closeModal('modalPickCeramica')">✕</button>
+    </div>
+
+    <input id="pickCeramicaSearch" placeholder="🔎 Buscar cerámica (código, alias o nombre)" autocomplete="off" />
+
+    <div class="cer-tabs" role="tablist" aria-label="Categorías">
+      <button type="button" class="chip" id="cerTab_TODAS" onclick="setCerPickTab('TODAS')">Todas</button>
+      <button type="button" class="chip" id="cerTab_CERAMICA" onclick="setCerPickTab('CERAMICA')">Cerámicas</button>
+      <button type="button" class="chip" id="cerTab_IVORY" onclick="setCerPickTab('IVORY')">Ivory</button>
+      <button type="button" class="chip" id="cerTab_PORCELANATO" onclick="setCerPickTab('PORCELANATO')">Porcelanatos</button>
+    </div>
+
+    <div id="pickCeramicaList" class="cer-pick-list" aria-label="Lista de cerámicas"></div>
+
+    <div class="btn-row">
+      <button type="button" class="secondary" onclick="closeModal('modalPickCeramica')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<div id="modalCeramicaHistory" class="modal">
+  <div class="modal-card">
+    <h3>🕘 Historial de cálculos</h3>
+    <div id="cerHistoryList" class="cer-history-list"></div>
+
+    <div class="btn-row">
+      <button type="button" class="secondary" onclick="closeModal('modalCeramicaHistory')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
 <!-- jsPDF -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
