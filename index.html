@@ -739,6 +739,51 @@
   </div>
 </div>
 
+
+
+<div id="modalCerMeta" class="modal">
+  <div class="modal-card">
+    <h3>📄 PDF / Guardar</h3>
+    <div class="muted">Configura el título del documento y ejecuta acciones rápidas.</div>
+
+    <label class="label" style="margin-top:10px;">Título (opcional)</label>
+    <input id="cerMetaTitulo" placeholder="Ej: Casa - Sala y Cocina (Carlos)" oninput="cerSetTitulo(this.value)" />
+
+    <div class="btn-row" style="margin-top:12px;">
+      <button type="button" class="secondary" onclick="closeModal('modalCerMeta')">Cerrar</button>
+      <button type="button" onclick="cerSaveDoc()">💾 Guardar</button>
+      <button type="button" class="success" onclick="cerExportPdf()">📄 PDF</button>
+    </div>
+
+    <div class="btn-row">
+      <button type="button" class="danger" onclick="cerResetDoc()">🗑️ Nuevo documento</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ================= ADMIN: CERÁMICA (WIZARD) ================= -->
+<div id="modalCerWizard" class="modal">
+  <div class="modal-card cer-wiz">
+    <div class="cer-wiz-head">
+      <h3 id="cerWizTitle">🧱 Cálculo de cerámica</h3>
+      <button type="button" class="icon-btn" onclick="cerWizClose()">✕</button>
+    </div>
+
+    <div id="cerWizStepper" class="cer-stepper" aria-label="Pasos del cálculo"></div>
+
+    <div id="cerWizError" class="cer-wiz-error" style="display:none;"></div>
+
+    <div id="cerWizBody" class="cer-wiz-body"></div>
+
+    <div class="cer-wiz-footer">
+      <button type="button" class="secondary" id="cerWizPrevBtn" onclick="cerWizPrev()">⬅ Atrás</button>
+      <button type="button" class="secondary" id="cerWizNextBtn" onclick="cerWizNext()">Siguiente ➜</button>
+      <button type="button" class="success" id="cerWizSaveBtn" style="display:none;" onclick="cerWizSave()">Guardar ✓</button>
+    </div>
+  </div>
+</div>
+
 <!-- jsPDF -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
