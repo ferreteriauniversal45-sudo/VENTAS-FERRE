@@ -3182,9 +3182,17 @@ function onBarcodeInput(val){
 const barcodeInput = el("barcodeInput");
 if (barcodeInput) {
   barcodeInput.addEventListener("input", (e) => onBarcodeInput(e.target.value));
+
   barcodeInput.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      try { cerrarModalBarcode(); } catch {}
+      try { cerrarModalBarcode(); } catch (err) {}
+      return;
+    }
+
+    // ✅ Para lector físico: muchos lectores envían Enter al final
+    if (e.key === "Enter") {
+      e.preventDefault();
+      onBarcodeInput(e.target.value);
     }
   });
 }
@@ -8562,6 +8570,7 @@ function abrirConsultaInventarioVendedor(){
     <div style="display:flex; gap:10px; margin-bottom:10px;">
       <button type="button" onclick="abrirAdminCotizacionesHome()">🧾 Cotizaciones</button>
       <button type="button" class="secondary" onclick="exportarPreciosAExcelAdmin()">📊 Exportar precios</button>
+      <button type="button" onclick="openCeramicaCalcScreen()">🧱 Cerámica</button>
     </div>
     <div class="muted" style="margin-top:-4px; margin-bottom:10px;">
       Toca un producto para <b>ver/editar precios</b>.
@@ -8985,3 +8994,950 @@ function seleccionarCatVend(catEnc){
   cerrarModalDeptoVend();
   renderConsultaInventarioVendedor();
 }
+
+
+/* ================= ADMIN: CALCULADORA CERÁMICA ================= */
+
+let ceramicaDocs = JSON.parse(localStorage.getItem("ceramicaDocs") || "[]");
+let ceramicaDraft = null;
+let cerPickTargetId = null;
+let cerPickTab = "TODAS";
+
+function __cerId(){
+  return String(Date.now()) + "_" + Math.random().toString(16).slice(2);
+}
+
+function __fmtInt(n){
+  const x = Number(n || 0);
+  return x.toLocaleString("en-US", { maximumFractionDigits: 0 });
+}
+
+function __fmt2(n){
+  const x = Number(n || 0);
+  return x.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function __norm(s){
+  return String(s || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function __cerCategoria(p){
+  const name = __norm(p?.producto || "");
+  const dept = __norm(p?.departamento || "");
+  const cat  = __norm(p?.categoria || "");
+  const blob = `${name} ${dept} ${cat}`;
+
+  if (blob.includes("IVORY")) return "IVORY";
+  if (blob.includes("PORCEL")) return "PORCELANATO";
+  if (blob.includes("CERAM") || blob.includes("AZULE") || blob.includes("PISO") || blob.includes("BALDOSA")) return "CERAMICA";
+  // Si no cae en nada, lo dejamos fuera del selector (para evitar ruido)
+  return "";
+}
+
+function __getCeramicas(){
+  // inventarioAdmin ya está ordenado por producto
+  return (Array.isArray(inventarioAdmin) ? inventarioAdmin : [])
+    .filter(p => __cerCategoria(p));
+}
+
+function __newCerItem(){
+  return {
+    id: __cerId(),
+    modo: "AREA", // AREA | TENGO
+    cerCodigo: "",
+    cerNombre: "",
+    cerAlias: "",
+    cerCategoria: "",
+    stockTotal: 0,
+
+    anchoCm: 60,
+    altoCm: 60,
+    desperdicioPct: 10,
+
+    piezasPorCaja: "",
+    inventarioUnidad: "PIEZA", // PIEZA | CAJA
+
+    areaM2: "",
+    tengoCant: ""
+  };
+}
+
+function __newCerDoc(){
+  return {
+    id: __cerId(),
+    titulo: "",
+    creado: Date.now(),
+    items: [__newCerItem()]
+  };
+}
+
+async function openCeramicaCalcScreen(docId){
+  // Mantener el "home mode" en inventario para que el botón Home vuelva donde corresponde
+  adminHomeMode = "INVENTARIO";
+
+  try { await ensureCatalogoCargado(false); } catch(e){ console.warn(e); }
+
+  if (docId) {
+    const d = (Array.isArray(ceramicaDocs) ? ceramicaDocs : []).find(x => String(x?.id) === String(docId));
+    if (d) ceramicaDraft = JSON.parse(JSON.stringify(d));
+    else ceramicaDraft = __newCerDoc();
+  } else {
+    ceramicaDraft = __newCerDoc();
+  }
+
+  renderCeramicaCalcScreen();
+  setTimeout(() => {
+    const first = ceramicaDraft?.items?.[0]?.id;
+    if (first) {
+      const inp = el("cerArea_"+first);
+      if (inp) inp.focus();
+    }
+  }, 60);
+}
+
+function cerBack(){
+  abrirConsultaInventarioVendedor();
+}
+
+function renderCeramicaCalcScreen(){
+  headerTitle.textContent = "Cerámica";
+  vendedorHome.classList.add("hidden");
+  operadorHome.classList.add("hidden");
+  contenido.classList.remove("hidden");
+
+  if (!ceramicaDraft) ceramicaDraft = __newCerDoc();
+
+  const items = Array.isArray(ceramicaDraft.items) ? ceramicaDraft.items : [];
+
+  contenido.innerHTML = `
+    <div class="cer-screen">
+      <div class="cer-topbar">
+        <div class="left">
+          <button type="button" class="secondary" onclick="cerBack()">⬅ Volver</button>
+          <div class="card-lite" style="margin:0;">
+            <div style="font-weight:900;">🧱 Cálculo de cerámica</div>
+            <div class="muted" style="margin-top:2px;">Agrega varios cálculos (diferentes tamaños) en una sola factura PDF.</div>
+          </div>
+        </div>
+
+        <div class="right">
+          <button type="button" class="secondary" onclick="openCeramicaHistory()">🕘 Historial</button>
+          <button type="button" class="secondary" onclick="cerNuevo()">➕ Nuevo</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <strong>📌 Proyecto / Cliente</strong>
+        <div class="muted">Opcional (aparece en el PDF)</div>
+        <input id="cerTitulo" placeholder="Ej: Casa - Sala y Cocina (Carlos)" value="${escapeHtml(ceramicaDraft.titulo || "")}" oninput="cerSetTitulo(this.value)" />
+      </div>
+
+      <div id="cerSummary" class="cer-kpis"></div>
+
+      <div class="cer-items">
+        ${items.map((it, idx) => cerItemHTML(it, idx)).join("")}
+      </div>
+
+      <div class="cer-actionsbar">
+        <div class="btn-row">
+          <button type="button" class="secondary" onclick="cerAddItem()">➕ Agregar cálculo</button>
+          <button type="button" onclick="cerSaveDoc()">💾 Guardar</button>
+          <button type="button" class="success" onclick="cerExportPdf()">📄 PDF (Compartir)</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // pintar resúmenes
+  cerRefreshSummary();
+  for (const it of items) cerRefreshItem(it.id);
+}
+
+function cerItemHTML(it, idx){
+  const title = `Cálculo ${idx+1}`;
+  const picked = it.cerNombre ? `
+    <div class="muted" style="margin-top:2px;">
+      <span class="cer-badge">${escapeHtml(it.cerCategoria || "CERÁMICA")}</span>
+      <span style="margin-left:6px;"><b>${escapeHtml(it.cerNombre)}</b></span>
+      <span style="margin-left:6px;">• Stock: <b>${__fmtInt(it.stockTotal)}</b></span>
+    </div>
+  ` : `<div class="muted" style="margin-top:2px;">Elige una cerámica para usar tu stock (opcional).</div>`;
+
+  const modeAreaActive = it.modo === "AREA" ? "active" : "";
+  const modeTengoActive = it.modo === "TENGO" ? "active" : "";
+
+  return `
+    <div class="cer-item" id="cerItem_${it.id}">
+      <div class="cer-item-head">
+        <div>
+          <div class="title">${title}</div>
+          <div id="cerProd_${it.id}">${picked}</div>
+        </div>
+        <div class="actions">
+          <button type="button" class="icon-btn" title="Duplicar" onclick="cerDuplicateItem('${it.id}')">⧉</button>
+          <button type="button" class="icon-btn" title="Eliminar" onclick="cerRemoveItem('${it.id}')">🗑️</button>
+        </div>
+      </div>
+
+      <div class="cer-item-body">
+        <button type="button" onclick="openPickCeramica('${it.id}')">🏷️ Elegir cerámica</button>
+
+        <div class="cer-grid">
+          <div>
+            <label class="muted" style="display:block; font-weight:900; margin-bottom:6px;">📏 Tamaño de pieza (cm)</label>
+            <div class="cer-grid" style="grid-template-columns: 1fr 1fr;">
+              <input id="cerW_${it.id}" inputmode="decimal" placeholder="Ancho" value="${escapeHtml(it.anchoCm)}" oninput="cerSet('${it.id}','anchoCm', this.value)" />
+              <input id="cerH_${it.id}" inputmode="decimal" placeholder="Alto" value="${escapeHtml(it.altoCm)}" oninput="cerSet('${it.id}','altoCm', this.value)" />
+            </div>
+            <div class="cer-chips" style="margin-top:8px;">
+              <button type="button" class="chip" onclick="cerPresetSize('${it.id}',30,30)">30×30</button>
+              <button type="button" class="chip" onclick="cerPresetSize('${it.id}',45,45)">45×45</button>
+              <button type="button" class="chip" onclick="cerPresetSize('${it.id}',60,60)">60×60</button>
+              <button type="button" class="chip" onclick="cerPresetSize('${it.id}',20,60)">20×60</button>
+            </div>
+          </div>
+
+          <div>
+            <label class="muted" style="display:block; font-weight:900; margin-bottom:6px;">📦 Caja / Inventario</label>
+            <input id="cerPPC_${it.id}" inputmode="numeric" placeholder="Piezas por caja (opcional)" value="${escapeHtml(it.piezasPorCaja)}" oninput="cerSet('${it.id}','piezasPorCaja', this.value)" />
+            <div class="cer-seg" style="margin-top:8px;">
+              <button type="button" class="${it.inventarioUnidad==='PIEZA'?'active':''}" onclick="cerSet('${it.id}','inventarioUnidad','PIEZA')">Inventario en PIEZA</button>
+              <button type="button" class="${it.inventarioUnidad==='CAJA'?'active':''}" onclick="cerSet('${it.id}','inventarioUnidad','CAJA')">Inventario en CAJA</button>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label class="muted" style="display:block; font-weight:900; margin-bottom:6px;">🎯 ¿Qué quieres calcular?</label>
+          <div class="cer-seg">
+            <button type="button" class="${modeAreaActive}" onclick="cerSet('${it.id}','modo','AREA')">Necesito para m²</button>
+            <button type="button" class="${modeTengoActive}" onclick="cerSet('${it.id}','modo','TENGO')">¿Cuánto cubro con lo que tengo?</button>
+          </div>
+        </div>
+
+        <div class="cer-grid">
+          <div>
+            <label class="muted" style="display:block; font-weight:900; margin-bottom:6px;">🧮 ${it.modo==='AREA'?'Área a cubrir (m²)':'Cantidad que tengo'}</label>
+            ${it.modo==='AREA'
+              ? `<input id="cerArea_${it.id}" inputmode="decimal" placeholder="Ej: 14" value="${escapeHtml(it.areaM2)}" oninput="cerSet('${it.id}','areaM2', this.value)" />`
+              : `<input id="cerTengo_${it.id}" inputmode="decimal" placeholder="Ej: 20" value="${escapeHtml(it.tengoCant)}" oninput="cerSet('${it.id}','tengoCant', this.value)" />`
+            }
+            <div class="muted" style="margin-top:4px;">
+              ${it.modo==='AREA' ? 'Puedes escribir 14, 14.5, etc.' : `Unidad: <b>${it.inventarioUnidad}</b>`}
+            </div>
+          </div>
+
+          <div>
+            <label class="muted" style="display:block; font-weight:900; margin-bottom:6px;">🧯 Desperdicio (%)</label>
+            <input id="cerWaste_${it.id}" type="range" min="0" max="25" step="1" value="${escapeHtml(it.desperdicioPct)}" oninput="cerSet('${it.id}','desperdicioPct', this.value)" />
+            <div class="cer-row" style="justify-content:space-between; margin-top:4px;">
+              <div class="muted">0%</div>
+              <div><b id="cerWasteLbl_${it.id}">${escapeHtml(it.desperdicioPct)}%</b></div>
+              <div class="muted">25%</div>
+            </div>
+            <div class="cer-chips" style="margin-top:8px;">
+              <button type="button" class="chip" onclick="cerSet('${it.id}','desperdicioPct',5)">5%</button>
+              <button type="button" class="chip" onclick="cerSet('${it.id}','desperdicioPct',10)">10%</button>
+              <button type="button" class="chip" onclick="cerSet('${it.id}','desperdicioPct',12)">12%</button>
+              <button type="button" class="chip" onclick="cerSet('${it.id}','desperdicioPct',15)">15%</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="cerRes_${it.id}" class="cer-result"></div>
+      </div>
+    </div>
+  `;
+}
+
+function cerSetTitulo(v){
+  if (!ceramicaDraft) return;
+  ceramicaDraft.titulo = String(v || "");
+}
+
+function cerPresetSize(itemId, w, h){
+  const it = cerFind(itemId);
+  if (!it) return;
+  it.anchoCm = Number(w)||0;
+  it.altoCm = Number(h)||0;
+
+  const iw = el("cerW_"+itemId);
+  const ih = el("cerH_"+itemId);
+  if (iw) iw.value = String(it.anchoCm);
+  if (ih) ih.value = String(it.altoCm);
+
+  cerRefreshItem(itemId);
+}
+
+function cerFind(id){
+  const items = Array.isArray(ceramicaDraft?.items) ? ceramicaDraft.items : [];
+  return items.find(x => String(x?.id) === String(id));
+}
+
+function cerSet(itemId, field, value){
+  const it = cerFind(itemId);
+  if (!it) return;
+
+  if (field === "modo") {
+    it.modo = (value === "TENGO") ? "TENGO" : "AREA";
+    renderCeramicaCalcScreen();
+    return;
+  }
+
+  if (field === "inventarioUnidad") {
+    it.inventarioUnidad = (value === "CAJA") ? "CAJA" : "PIEZA";
+    cerRefreshItem(itemId);
+    cerRefreshSummary();
+    return;
+  }
+
+  if (field === "anchoCm" || field === "altoCm") {
+    it[field] = Number(String(value||"").replace(",", ".")) || 0;
+  } else if (field === "desperdicioPct") {
+    it.desperdicioPct = Math.min(25, Math.max(0, Number(value)||0));
+    const lbl = el("cerWasteLbl_"+itemId);
+    if (lbl) lbl.textContent = `${it.desperdicioPct}%`;
+  } else if (field === "piezasPorCaja") {
+    it.piezasPorCaja = String(value || "").trim();
+  } else if (field === "areaM2") {
+    it.areaM2 = String(value || "").trim();
+  } else if (field === "tengoCant") {
+    it.tengoCant = String(value || "").trim();
+  } else {
+    it[field] = value;
+  }
+
+  cerRefreshItem(itemId);
+  cerRefreshSummary();
+}
+
+function cerAddItem(){
+  if (!ceramicaDraft) ceramicaDraft = __newCerDoc();
+  ceramicaDraft.items = Array.isArray(ceramicaDraft.items) ? ceramicaDraft.items : [];
+  ceramicaDraft.items.push(__newCerItem());
+  renderCeramicaCalcScreen();
+}
+
+function cerRemoveItem(itemId){
+  if (!ceramicaDraft?.items || ceramicaDraft.items.length <= 1) {
+    alert("Debe existir al menos 1 cálculo.");
+    return;
+  }
+  ceramicaDraft.items = ceramicaDraft.items.filter(x => String(x?.id) !== String(itemId));
+  renderCeramicaCalcScreen();
+}
+
+function cerDuplicateItem(itemId){
+  const it = cerFind(itemId);
+  if (!it) return;
+  const copy = JSON.parse(JSON.stringify(it));
+  copy.id = __cerId();
+  ceramicaDraft.items.push(copy);
+  renderCeramicaCalcScreen();
+}
+
+function cerNuevo(){
+  ceramicaDraft = __newCerDoc();
+  renderCeramicaCalcScreen();
+}
+
+function cerCompute(it){
+  const w = Number(it.anchoCm)||0;
+  const h = Number(it.altoCm)||0;
+  const areaPieza = (w/100) * (h/100); // m2
+  const desperd = Math.max(0, Number(it.desperdicioPct)||0) / 100;
+
+  const ppc = Number(String(it.piezasPorCaja||"").replace(",", ".")) || 0;
+  const stock = Number(it.stockTotal)||0;
+  const unidad = it.inventarioUnidad === "CAJA" ? "CAJA" : "PIEZA";
+
+  if (!areaPieza || areaPieza <= 0) {
+    return { ok:false, msg:"Ingresa el tamaño de la pieza (cm).", areaPieza:0 };
+  }
+
+  if (it.modo === "AREA") {
+    const area = Number(String(it.areaM2||"").replace(",", ".")) || 0;
+    if (!area || area <= 0) return { ok:false, msg:"Ingresa el área (m²).", areaPieza };
+
+    const areaConMerma = area * (1 + desperd);
+    const piezas = Math.ceil(areaConMerma / areaPieza);
+
+    let cajas = 0;
+    if (ppc > 0) cajas = Math.ceil(piezas / ppc);
+
+    // stock interpretado según unidad elegida
+    let stockPiezas = stock;
+    let stockCajas = stock;
+
+    if (unidad === "CAJA") {
+      stockCajas = stock;
+      stockPiezas = (ppc > 0) ? (stock * ppc) : (stock * 0);
+    } else {
+      stockPiezas = stock;
+      stockCajas = (ppc > 0) ? Math.floor(stock / ppc) : 0;
+    }
+
+    const faltanPiezas = Math.max(0, piezas - (stockPiezas || 0));
+    const faltanCajas = (ppc > 0) ? Math.max(0, Math.ceil(faltanPiezas / ppc)) : 0;
+
+    return {
+      ok:true,
+      modo:"AREA",
+      areaPieza,
+      area,
+      areaConMerma,
+      piezas,
+      cajas,
+      ppc,
+      unidad,
+      stockPiezas,
+      stockCajas,
+      faltanPiezas,
+      faltanCajas
+    };
+  }
+
+  // modo TENGO
+  const tengo = Number(String(it.tengoCant||"").replace(",", ".")) || 0;
+  if (!tengo || tengo <= 0) return { ok:false, msg:"Ingresa cuánta cerámica tienes.", areaPieza };
+
+  const piezasDisponibles = (unidad === "CAJA")
+    ? ((ppc > 0) ? (tengo * ppc) : 0)
+    : tengo;
+
+  const areaSinMerma = piezasDisponibles * areaPieza;
+  const areaConMerma = areaSinMerma / (1 + desperd);
+
+  return {
+    ok:true,
+    modo:"TENGO",
+    areaPieza,
+    tengo,
+    piezasDisponibles,
+    areaSinMerma,
+    areaConMerma,
+    ppc,
+    unidad
+  };
+}
+
+function cerRefreshItem(itemId){
+  const it = cerFind(itemId);
+  if (!it) return;
+
+  const res = cerCompute(it);
+
+  const box = el("cerRes_"+itemId);
+  if (box) {
+    if (!res.ok) {
+      box.innerHTML = `<b>⚠️ ${escapeHtml(res.msg || "Completa los datos.")}</b>`;
+    } else if (res.modo === "AREA") {
+      box.innerHTML = `
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:space-between;">
+          <div>
+            <div><b>✅ Necesitas:</b> ${__fmtInt(res.piezas)} piezas${(res.ppc>0?` • ${__fmtInt(res.cajas)} cajas`:"")}</div>
+            <div class="muted">Pieza: ${__fmt2(res.areaPieza)} m² • Área con merma: ${__fmt2(res.areaConMerma)} m²</div>
+          </div>
+          <div style="text-align:right;">
+            <div><b>Stock:</b> ${__fmtInt(res.stockPiezas||0)} piezas${(res.ppc>0?` • ${__fmtInt(res.stockCajas||0)} cajas`:"")}</div>
+            <div class="muted">Unidad inventario: ${escapeHtml(res.unidad)}</div>
+          </div>
+        </div>
+        <hr style="border:none; border-top:1px solid var(--borde); margin:10px 0;">
+        <div><b>🛒 Recomendación:</b> ${res.faltanPiezas>0 ? `Comprar ${__fmtInt(res.faltanPiezas)} piezas${(res.ppc>0?` (~${__fmtInt(res.faltanCajas)} cajas)`:"")}` : "Tu stock alcanza ✅"}</div>
+      `;
+    } else {
+      box.innerHTML = `
+        <div><b>✅ Con lo que tienes:</b> cubres ~ <span style="font-size:18px; font-weight:900;">${__fmt2(res.areaConMerma)}</span> m²</div>
+        <div class="muted">Sin merma: ${__fmt2(res.areaSinMerma)} m² • Pieza: ${__fmt2(res.areaPieza)} m² • Desperdicio: ${__fmtInt(it.desperdicioPct)}%</div>
+      `;
+    }
+  }
+
+  const lbl = el("cerWasteLbl_"+itemId);
+  if (lbl) lbl.textContent = `${__fmtInt(it.desperdicioPct)}%`;
+
+  // update picked summary
+  const prodBox = el("cerProd_"+itemId);
+  if (prodBox) {
+    if (it.cerNombre) {
+      prodBox.innerHTML = `
+        <div class="muted" style="margin-top:2px;">
+          <span class="cer-badge">${escapeHtml(it.cerCategoria || "CERÁMICA")}</span>
+          <span style="margin-left:6px;"><b>${escapeHtml(it.cerNombre)}</b></span>
+          <span style="margin-left:6px;">• Stock: <b>${__fmtInt(it.stockTotal)}</b></span>
+        </div>
+      `;
+    } else {
+      prodBox.innerHTML = `<div class="muted" style="margin-top:2px;">Elige una cerámica para usar tu stock (opcional).</div>`;
+    }
+  }
+}
+
+function cerRefreshSummary(){
+  const box = el("cerSummary");
+  if (!box) return;
+
+  const items = Array.isArray(ceramicaDraft?.items) ? ceramicaDraft.items : [];
+  let totalArea = 0;
+  let totalPiezas = 0;
+  let totalCajas = 0;
+  let totalComprarPiezas = 0;
+  let totalComprarCajas = 0;
+
+  for (const it of items) {
+    const r = cerCompute(it);
+    if (r.ok && r.modo === "AREA") {
+      totalArea += Number(r.area||0);
+      totalPiezas += Number(r.piezas||0);
+      totalCajas += Number(r.cajas||0);
+      totalComprarPiezas += Number(r.faltanPiezas||0);
+      totalComprarCajas += Number(r.faltanCajas||0);
+    }
+  }
+
+  box.innerHTML = `
+    <div class="cer-kpi">
+      <div class="k">Área total (m²)</div>
+      <div class="v">${__fmt2(totalArea)}</div>
+    </div>
+    <div class="cer-kpi">
+      <div class="k">Necesitas (piezas)</div>
+      <div class="v">${__fmtInt(totalPiezas)}</div>
+    </div>
+    <div class="cer-kpi">
+      <div class="k">Recomendación compra</div>
+      <div class="v">${totalComprarPiezas>0 ? __fmtInt(totalComprarPiezas) : "0"}</div>
+      <div class="muted" style="margin-top:2px;">${(totalComprarCajas>0 ? `≈ ${__fmtInt(totalComprarCajas)} cajas` : "Stock suficiente o sin cajas")}</div>
+    </div>
+  `;
+}
+
+/* --- Modal pick cerámica --- */
+
+function setCerPickTab(tab){
+  cerPickTab = String(tab || "TODAS");
+
+  const tabs = ["TODAS","CERAMICA","IVORY","PORCELANATO"];
+  for (const t of tabs) {
+    const b = el("cerTab_"+t);
+    if (b) b.classList.toggle("active", t === cerPickTab);
+  }
+  renderPickCeramicaList();
+}
+
+function openPickCeramica(itemId){
+  cerPickTargetId = String(itemId || "");
+  if (!cerPickTargetId) return;
+
+  // asegurarnos que el catálogo está listo
+  if (!catalogoCargado) {
+    // no bloqueamos: igual abrimos y mostramos mensaje
+  }
+
+  const s = el("pickCeramicaSearch");
+  if (s) {
+    s.value = "";
+    s.oninput = () => renderPickCeramicaList();
+    setTimeout(() => s.focus(), 50);
+  }
+
+  setCerPickTab("TODAS");
+  renderPickCeramicaList();
+  openModal("modalPickCeramica");
+}
+
+function renderPickCeramicaList(){
+  const list = el("pickCeramicaList");
+  if (!list) return;
+
+  const q = String(el("pickCeramicaSearch")?.value || "").trim();
+  const qn = __norm(q);
+
+  const all = __getCeramicas();
+
+  let items = all;
+
+  if (cerPickTab !== "TODAS") {
+    items = items.filter(p => __cerCategoria(p) === cerPickTab);
+  }
+
+  if (qn) {
+    items = items.filter(p => {
+      const blob = __norm(`${p.codigo} ${p.alias} ${p.producto}`);
+      return blob.includes(qn);
+    });
+  }
+
+  if (!items.length) {
+    list.innerHTML = `<div class="cer-pick-item"><div><div class="name">No hay coincidencias</div><div class="meta">Prueba otro nombre o cambia la categoría.</div></div></div>`;
+    return;
+  }
+
+  // limitar para rendimiento
+  const max = 200;
+  const shown = items.slice(0, max);
+
+  list.innerHTML = shown.map(p => {
+    const cat = __cerCategoria(p) || "CERÁMICA";
+    const name = p.producto || "";
+    const code = p.codigo || "";
+    const alias = p.alias || "";
+    const stock = Number(p.stockTotal || 0);
+    return `
+      <div class="cer-pick-item" onclick="pickCeramica('${encodeURIComponent(String(code))}')">
+        <div>
+          <div class="name">${escapeHtml(name)}</div>
+          <div class="meta">
+            <span class="cer-badge">${escapeHtml(cat)}</span>
+            <span style="margin-left:6px;">Código: <b>${escapeHtml(code)}</b></span>
+            ${alias ? `<span style="margin-left:6px;">Alias: <b>${escapeHtml(alias)}</b></span>` : ""}
+          </div>
+        </div>
+        <div class="cer-stock">
+          <div class="n">${__fmtInt(stock)}</div>
+          <div class="t">Stock total</div>
+        </div>
+      </div>
+    `;
+  }).join("") + (items.length>max ? `<div class="muted" style="margin-top:8px;">Mostrando ${max} de ${items.length} resultados. Usa el buscador.</div>` : "");
+}
+
+function pickCeramica(codeEnc){
+  const code = decodeURIComponent(codeEnc || "");
+  if (!cerPickTargetId) return;
+
+  const it = cerFind(cerPickTargetId);
+  if (!it) return;
+
+  const p = inventarioAdmin.find(x => String(x?.codigo) === String(code));
+  if (!p) return;
+
+  it.cerCodigo = String(p.codigo || "");
+  it.cerNombre = String(p.producto || "");
+  it.cerAlias = String(p.alias || "");
+  it.cerCategoria = __cerCategoria(p) || "CERÁMICA";
+  it.stockTotal = Number(p.stockTotal || 0);
+
+  closeModal("modalPickCeramica");
+  cerRefreshItem(cerPickTargetId);
+  cerRefreshSummary();
+}
+
+/* --- Guardar / Historial --- */
+
+function cerSaveDoc(){
+  if (!ceramicaDraft) return;
+
+  // Guardar snapshot limpio
+  const snap = JSON.parse(JSON.stringify(ceramicaDraft));
+  snap.modificado = Date.now();
+
+  // Validación básica
+  if (!Array.isArray(snap.items) || !snap.items.length) {
+    alert("Agrega al menos 1 cálculo.");
+    return;
+  }
+
+  // upsert
+  ceramicaDocs = Array.isArray(ceramicaDocs) ? ceramicaDocs : [];
+  const idx = ceramicaDocs.findIndex(x => String(x?.id) === String(snap.id));
+  if (idx >= 0) ceramicaDocs[idx] = snap;
+  else ceramicaDocs.unshift(snap);
+
+  localStorage.setItem("ceramicaDocs", JSON.stringify(ceramicaDocs));
+  try { showToast("Guardado ✅"); } catch { alert("Guardado ✅"); }
+}
+
+function openCeramicaHistory(){
+  try { ceramicaDocs = JSON.parse(localStorage.getItem("ceramicaDocs") || "[]"); } catch { ceramicaDocs = []; }
+  const list = el("cerHistoryList");
+  if (!list) return;
+
+  const docs = Array.isArray(ceramicaDocs) ? ceramicaDocs : [];
+
+  if (!docs.length) {
+    list.innerHTML = `<div class="muted">Aún no has guardado cálculos.</div>`;
+  } else {
+    list.innerHTML = docs.slice(0, 50).map(d => {
+      const t = d.titulo ? escapeHtml(d.titulo) : "(Sin título)";
+      const when = new Date(d.modificado || d.creado || Date.now()).toLocaleString("es-ES");
+      const n = Array.isArray(d.items) ? d.items.length : 0;
+      return `
+        <div class="card-lite">
+          <div style="font-weight:900;">${t}</div>
+          <div class="muted">${escapeHtml(when)} • ${n} cálculo(s)</div>
+          <div class="btn-row" style="margin-top:10px;">
+            <button type="button" onclick="openCeramicaCalcScreen('${escapeHtml(String(d.id))}'); closeModal('modalCeramicaHistory')">Abrir</button>
+            <button type="button" class="secondary" onclick="cerExportPdfFromHistory('${escapeHtml(String(d.id))}')">PDF</button>
+            <button type="button" class="danger" onclick="cerDeleteDoc('${escapeHtml(String(d.id))}')">Eliminar</button>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  openModal("modalCeramicaHistory");
+}
+
+function cerDeleteDoc(id){
+  if (!confirm("¿Eliminar este cálculo guardado?")) return;
+  ceramicaDocs = Array.isArray(ceramicaDocs) ? ceramicaDocs : [];
+  ceramicaDocs = ceramicaDocs.filter(x => String(x?.id) !== String(id));
+  localStorage.setItem("ceramicaDocs", JSON.stringify(ceramicaDocs));
+  openCeramicaHistory();
+}
+
+async function cerExportPdfFromHistory(id){
+  const d = (Array.isArray(ceramicaDocs) ? ceramicaDocs : []).find(x => String(x?.id) === String(id));
+  if (!d) return alert("No se encontró el cálculo.");
+  try {
+    await crearPdfCeramica(d);
+    await autoShareLastFile();
+  } catch(e){
+    console.error(e);
+    alert("❌ No se pudo generar el PDF.");
+  }
+}
+
+/* --- PDF --- */
+
+async function autoShareLastFile(){
+  // Android (WebView puente)
+  if (window.Android && typeof window.Android.guardarPdfBase64 === "function") {
+    try { compartirArchivo(); } catch {}
+    return;
+  }
+
+  // Web Share API (si soporta archivos)
+  try {
+    if (navigator.share && lastFile?.blob) {
+      const f = new File([lastFile.blob], lastFile.filename || "archivo.pdf", { type: lastFile.mime || "application/pdf" });
+      if (!navigator.canShare || navigator.canShare({ files: [f] })) {
+        await navigator.share({
+          files: [f],
+          title: lastFile.title || "Documento",
+          text: lastFile.text || ""
+        });
+        return;
+      }
+    }
+  } catch (e) {
+    // si cancela share, seguimos con fallback
+  }
+
+  // fallback
+  try { window.open(lastFile.url, "_blank"); } catch { try { descargarArchivo(); } catch {} }
+}
+
+async function cerExportPdf(){
+  if (!ceramicaDraft) return;
+
+  // Guardar antes de exportar (práctico para reusar)
+  try { cerSaveDoc(); } catch {}
+
+  try {
+    await crearPdfCeramica(ceramicaDraft);
+    await autoShareLastFile(); // ✅ compartir automáticamente
+  } catch(e){
+    console.error(e);
+    alert("❌ No se pudo generar el PDF.");
+  }
+}
+
+async function crearPdfCeramica(docData){
+  const pkg = window.jspdf || {};
+  const jsPDF = pkg.jsPDF;
+  const GState = pkg.GState;
+
+  if (!jsPDF) {
+    alert("No se encontró jsPDF. Revisa el script en index.html.");
+    return;
+  }
+
+  const PAGE_W = 80;
+  const PAGE_H = 297;
+  const marginL = 4;
+  const marginR = PAGE_W - 4;
+  const lineH = 4.2;
+  const bottomReserve = 18;
+
+  const doc = new jsPDF({ unit: "mm", format: [PAGE_W, PAGE_H] });
+
+  const logoDataUrl = await getLogoDataUrl().catch(() => null);
+
+  let y = 6;
+  let page = 1;
+
+  function setOpacity(a){
+    try { if (GState) doc.setGState(new GState({ opacity: a })); } catch {}
+  }
+
+  function header(){
+    // watermark suave
+    doc.setTextColor(180, 180, 180);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    setOpacity(0.10);
+    doc.text("CERÁMICA", 40, 150, { align: "center", angle: 45 });
+    setOpacity(1);
+
+    if (logoDataUrl) {
+      doc.addImage(logoDataUrl, "PNG", 30, y, 20, 18);
+      y += 22;
+    }
+
+    doc.setTextColor(36, 58, 143);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("FERRETERÍA UNIVERSAL", 40, y, { align: "center" });
+    y += 6;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(31, 41, 55);
+    doc.text(`RTN: ${EMPRESA_RTN}`, 40, y, { align: "center" });
+    y += 5;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.text("CALCULO DE METROS CUADRADOS DE CERAMICAS", 40, y, { align: "center" });
+    y += 6;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    const now = new Date();
+    doc.text(`Fecha: ${now.toLocaleString("es-ES")}`, marginL, y);
+    y += 4.5;
+
+    const titulo = String(docData?.titulo || "").trim();
+    if (titulo) {
+      const lines = doc.splitTextToSize(`Proyecto/Cliente: ${titulo}`, PAGE_W - marginL*2);
+      for (const ln of lines) {
+        doc.text(ln, marginL, y);
+        y += 4.2;
+      }
+    }
+
+    doc.setDrawColor(220);
+    doc.line(marginL, y, marginR, y);
+    y += 4;
+  }
+
+  function ensureSpace(extra){
+    if (y + extra + bottomReserve > PAGE_H) {
+      doc.addPage();
+      page += 1;
+      y = 10;
+      doc.setTextColor(31, 41, 55);
+    }
+  }
+
+  function rowKeyVal(k, v){
+    doc.setFont("helvetica", "bold");
+    doc.text(String(k), marginL, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(String(v), marginR, y, { align: "right" });
+    y += lineH;
+  }
+
+  header();
+
+  const items = Array.isArray(docData?.items) ? docData.items : [];
+  let totalArea = 0;
+  let totalPiezas = 0;
+  let totalCajas = 0;
+  let totalComprarP = 0;
+  let totalComprarC = 0;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("DETALLE", marginL, y);
+  y += 4;
+
+  for (let i=0;i<items.length;i++){
+    const it = items[i];
+    const r = cerCompute(it);
+
+    ensureSpace(40);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text(`• Cálculo ${i+1}`, marginL, y);
+    y += 4.5;
+
+    const name = it.cerNombre ? it.cerNombre : "Cerámica (sin seleccionar)";
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    const nameLines = doc.splitTextToSize(name, PAGE_W - marginL*2);
+    for (const ln of nameLines) { doc.text(ln, marginL, y); y += 4.1; }
+
+    const sizeTxt = `${__fmtInt(it.anchoCm)}×${__fmtInt(it.altoCm)} cm`;
+    rowKeyVal("Tamaño", sizeTxt);
+
+    const ppc = Number(String(it.piezasPorCaja||"").replace(",", ".")) || 0;
+    rowKeyVal("Merma", `${__fmtInt(it.desperdicioPct)}%`);
+    rowKeyVal("Pz/Caja", ppc>0 ? __fmtInt(ppc) : "-");
+    rowKeyVal("Unidad", it.inventarioUnidad || "PIEZA");
+
+    if (!r.ok) {
+      doc.setFont("helvetica", "bold");
+      doc.text("⚠️ Datos incompletos", marginL, y);
+      y += 5;
+    } else if (r.modo === "AREA") {
+      totalArea += Number(r.area||0);
+      totalPiezas += Number(r.piezas||0);
+      totalCajas += Number(r.cajas||0);
+      totalComprarP += Number(r.faltanPiezas||0);
+      totalComprarC += Number(r.faltanCajas||0);
+
+      rowKeyVal("Área", `${__fmt2(r.area)} m²`);
+      rowKeyVal("Necesitas", `${__fmtInt(r.piezas)} pz`);
+      if (r.ppc>0) rowKeyVal("Cajas", `${__fmtInt(r.cajas)} caja(s)`);
+
+      rowKeyVal("Stock pz", __fmtInt(r.stockPiezas||0));
+      if (r.ppc>0) rowKeyVal("Stock cajas", __fmtInt(r.stockCajas||0));
+
+      if (r.faltanPiezas>0) {
+        doc.setFont("helvetica", "bold");
+        doc.text(`Comprar: ${__fmtInt(r.faltanPiezas)} pz${(r.ppc>0?` (~${__fmtInt(r.faltanCajas)} cajas)`:"")}`, marginL, y);
+        y += 4.8;
+      } else {
+        doc.setFont("helvetica", "bold");
+        doc.text("Stock suficiente ✅", marginL, y);
+        y += 4.8;
+      }
+    } else {
+      rowKeyVal("Tienes", `${__fmtInt(r.tengo)} ${r.unidad}`);
+      rowKeyVal("Cubre", `${__fmt2(r.areaConMerma)} m²`);
+    }
+
+    doc.setDrawColor(230);
+    doc.line(marginL, y, marginR, y);
+    y += 4;
+  }
+
+  ensureSpace(30);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9.5);
+  doc.text("RESUMEN", marginL, y);
+  y += 5;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.8);
+  rowKeyVal("Área total", `${__fmt2(totalArea)} m²`);
+  rowKeyVal("Total piezas", __fmtInt(totalPiezas));
+  if (totalCajas>0) rowKeyVal("Total cajas", __fmtInt(totalCajas));
+  rowKeyVal("Recomendación", totalComprarP>0 ? `${__fmtInt(totalComprarP)} pz` : "0 pz");
+  if (totalComprarC>0) rowKeyVal("≈ cajas", __fmtInt(totalComprarC));
+
+  doc.setFontSize(8);
+  doc.setTextColor(100);
+  doc.text("Nota: El cálculo depende del tamaño y la merma elegida.", marginL, PAGE_H - 10);
+
+  const blob = doc.output("blob");
+  const fname = `CALCULO_CERAMICA_${new Date().toISOString().slice(0,10)}.pdf`;
+  setLastFile(blob, fname, "Cálculo de cerámica", "Cálculo de metros cuadrados de cerámica.", "application/pdf");
+}
+
