@@ -5414,7 +5414,10 @@ async function abrirEntradasOperadorEditar(movId){
       id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
       codigo,
       producto: x.producto || (prod ? (prod.producto || "") : ""),
-      cantidad: Number(x.cantidad || 0) || 0
+      cantidad: Number(x.cantidad || 0) || 0,
+      agregadoEn: x.agregadoEn || "",
+      agregadoAtISO: x.agregadoAtISO || "",
+      agregadoAtEpoch: x.agregadoAtEpoch || ""
     });
   });
 
@@ -5832,8 +5835,15 @@ function seleccionarProductoOperador(codigo){
     const it = conteoDoc?.items?.find(x => x.id === operadorFilaActivaId);
     if (!it) return;
 
+    const prevCode = String(it.codigo || "").trim();
+
     it.codigo = codigoFmt;
     it.producto = nombre;
+
+    // ✅ Sello por línea (fecha/hora) cuando se selecciona un producto en CONTEO
+    if (codigoFmt && (prevCode !== String(codigoFmt).trim() || (!it.agregadoAtISO && !it.agregadoAtEpoch && !it.agregadoEn))) {
+      ensureItemAgregadoTs(it, true);
+    }
 
     const codeInput = el("opCCodigo_" + it.id);
     const prodInput = el("opCProd_" + it.id);
@@ -6009,7 +6019,7 @@ function confirmarAddMovItem(){
     actualizarPreviewSalida();
   } else if (addMovTipo === "CONTEO") {
     if (!conteoDoc) return;
-    addOrSumMovItem(conteoDoc.items, codigo, prod.producto || "", qty);
+    addOrSumMovItem(conteoDoc.items, codigo, prod.producto || "", qty, { setAgregadoTs: true });
     renderFilasConteo();
     actualizarPreviewConteo();
   }
@@ -6023,21 +6033,47 @@ function confirmarAddMovItem(){
   setTimeout(() => el("addMovCodigo")?.focus(), 50);
 }
 
-function addOrSumMovItem(arr, codigo, producto, qty){
-  const existing = arr.find(x => String(x.codigo || "").trim() === String(codigo || "").trim());
+function ensureItemAgregadoTs(it, force = false){
+  if (!it) return;
+
+  const hasAny = !!(it.agregadoAtISO || it.agregadoAtEpoch || it.agregadoEn);
+  if (hasAny && !force) return;
+
+  const d = new Date();
+  it.agregadoAtISO = d.toISOString();
+  it.agregadoAtEpoch = d.getTime();
+  it.agregadoEn = d.toLocaleString("es-HN");
+}
+
+function addOrSumMovItem(arr, codigo, producto, qty, opts){
+  const o = opts || {};
+  const setTs = !!o.setAgregadoTs;
+
+  const codNorm = String(codigo || "").trim();
+  const existing = arr.find(x => String(x.codigo || "").trim() === codNorm);
+
   if (existing) {
     const prev = Number(existing.cantidad || 0) || 0;
     existing.cantidad = prev + Number(qty || 0);
     existing.producto = producto || existing.producto || "";
+
+    // Si estamos en CONTEO y el ítem venía de antes sin timestamp, lo sellamos.
+    if (setTs && !existing.agregadoAtISO && !existing.agregadoAtEpoch && !existing.agregadoEn) {
+      ensureItemAgregadoTs(existing, true);
+    }
     return;
   }
 
-  arr.push({
+  const nuevo = {
     id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
     codigo,
     producto: producto || "",
     cantidad: Number(qty || 0)
-  });
+  };
+
+  if (setTs) ensureItemAgregadoTs(nuevo, true);
+
+  arr.push(nuevo);
 }
 
 // Eventos del modal (input + Enter)
@@ -6089,7 +6125,11 @@ function guardarFacturaEntradas(){
     .map(x => ({
       codigo: x.codigo,
       producto: x.producto || "",
-      cantidad: Number(x.cantidad || 0)
+      cantidad: Number(x.cantidad || 0),
+      // ✅ Fecha/hora por línea (cuando se agregó el producto al conteo)
+      agregadoEn: x.agregadoEn || "",
+      agregadoAtISO: x.agregadoAtISO || "",
+      agregadoAtEpoch: x.agregadoAtEpoch || ""
     }));
 
   if (!String(f.facturaNo || "").trim()) {
@@ -7478,6 +7518,7 @@ function onCodigoConteoInput(id, value){
   const it = conteoDoc.items.find(x => x.id === id);
   if (!it) return;
 
+  const prevCode = String(it.codigo || "").trim();
   const formatted = formatCodigoAutoGuion(value);
   it.codigo = formatted;
 
@@ -7487,13 +7528,17 @@ function onCodigoConteoInput(id, value){
   const prod = getProdByCodigo(formatted);
   it.producto = prod ? (prod.producto || "") : "";
 
+  // ✅ Sello por línea (fecha/hora) cuando el código se vuelve válido en CONTEO
+  if (prod && formatted && (prevCode !== String(formatted).trim() || (!it.agregadoAtISO && !it.agregadoAtEpoch && !it.agregadoEn))) {
+    ensureItemAgregadoTs(it, true);
+  }
+
   const prodInput = el("opCProd_" + id);
   if (prodInput) prodInput.value = it.producto;
 
   updateSugerenciasConteo(id);
   actualizarPreviewConteo();
 }
-
 function onCantidadConteoInput(id, value){
   const it = conteoDoc.items.find(x => x.id === id);
   if (!it) return;
@@ -8397,6 +8442,16 @@ async function exportarMovimientosExcelYVaciar(){
           }
         } catch {}
 
+                // ✅ En CONTEO: "Realizado" por línea = momento en que se agregó el producto
+        let realizadoLinea = realizado;
+        if (it?.agregadoEn) {
+          realizadoLinea = it.agregadoEn;
+        } else if (it?.agregadoAtISO) {
+          try { realizadoLinea = new Date(it.agregadoAtISO).toLocaleString("es-HN"); } catch {}
+        } else if (it?.agregadoAtEpoch) {
+          try { realizadoLinea = new Date(Number(it.agregadoAtEpoch)).toLocaleString("es-HN"); } catch {}
+        }
+
         conteosRows.push([
           m.id || "",
           usuario,
@@ -8408,7 +8463,7 @@ async function exportarMovimientosExcelYVaciar(){
           it.producto || "",
           stockActual,
           Number(it.cantidad || 0),
-          realizado
+          realizadoLinea
         ]);
       });
     });
@@ -10697,4 +10752,3 @@ async function crearPdfCeramica(docData){
   const fname = `CALCULO_CERAMICA_${new Date().toISOString().slice(0,10)}.pdf`;
   setLastFile(blob, fname, "Cálculo de cerámica", "Cálculo de metros cuadrados de cerámica.", "application/pdf");
 }
-
