@@ -7378,7 +7378,12 @@ async function abrirConteosOperadorEditar(movId){
       id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
       codigo,
       producto: x.producto || (prod ? (prod.producto || "") : ""),
-      cantidad: Number(x.cantidad || 0) || 0
+      cantidad: Number(x.cantidad || 0) || 0,
+
+      // ✅ Mantener sello por línea al editar (para que siga saliendo por línea en Excel)
+      agregadoAtISO: x.agregadoAtISO || "",
+      agregadoAtEpoch: x.agregadoAtEpoch || "",
+      agregadoEn: x.agregadoEn || ""
     });
   });
 
@@ -7589,9 +7594,16 @@ function seleccionarSugerenciaConteo(filaId, codigo){
 const it = conteoDoc.items.find(x => x.id === filaId);
   if (!it) return;
 
+  const prevCode = String(it.codigo || "").trim();
+
   const prod = getProdByCodigo(codigoDec);
   it.codigo = codigoDec;
   it.producto = prod ? (prod.producto || "") : "";
+
+  // ✅ Sello por línea (fecha/hora) cuando se selecciona una sugerencia en CONTEO
+  if (prod && codigoDec && (prevCode !== String(codigoDec).trim() || (!it.agregadoAtISO && !it.agregadoAtEpoch && !it.agregadoEn))) {
+    ensureItemAgregadoTs(it, true);
+  }
 
   const codeInput = el("opCCodigo_" + filaId);
   const prodInput = el("opCProd_" + filaId);
@@ -7667,11 +7679,23 @@ function guardarConteo(){
 
   const itemsOk = f.items
     .filter(x => (x.codigo || "").trim() && String(x.cantidad).trim() !== "" )
-    .map(x => ({
-      codigo: x.codigo,
-      producto: x.producto || "",
-      cantidad: Number(x.cantidad || 0)
-    }));
+    .map(x => {
+      // ✅ Asegurar sello por línea (si por alguna razón no se estableció al agregar/seleccionar)
+      if (!x.agregadoAtISO && !x.agregadoAtEpoch && !x.agregadoEn) {
+        try { ensureItemAgregadoTs(x, true); } catch {}
+      }
+
+      return {
+        codigo: x.codigo,
+        producto: x.producto || "",
+        cantidad: Number(x.cantidad || 0),
+
+        // ✅ Persistir timestamp por línea para exportación a Excel
+        agregadoAtISO: x.agregadoAtISO || "",
+        agregadoAtEpoch: x.agregadoAtEpoch || "",
+        agregadoEn: x.agregadoEn || ""
+      };
+    });
 
   if (!itemsOk.length) {
     alert("Agrega al menos un producto (código y cantidad contada).");
