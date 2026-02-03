@@ -23,6 +23,7 @@
     <div id="roles">
       <button type="button" onclick="selectRole('OPERADOR')">👷 OPERADOR</button>
       <button type="button" onclick="selectRole('BODEGUERO')">📦 BODEGUERO</button>
+      <button type="button" onclick="selectRole('RECEPCION')">📥 RECEPCIÓN</button>
       <button type="button" onclick="selectRole('VISUALIZADOR')">👀 VISUALIZADOR</button>
       <button type="button" onclick="selectRole('VENDEDOR')">🧾 VENDEDOR</button>
       <button type="button" onclick="selectRole('VENDEDOR_JULIO')">🧾 VENDEDOR JULIO</button>
@@ -294,6 +295,21 @@
     <input id="barcodeInput" inputmode="numeric" autocomplete="off" placeholder="Ej: 7453078507354" />
 
     <div id="barcodeStatus" class="barcode-status hidden"></div>
+
+    <!-- Confirmación de cantidad (opcional) -->
+    <div id="barcodeConfirm" class="hidden" style="margin-top:10px;">
+      <div class="card-lite" style="margin:0;">
+        <label class="label">Cantidad</label>
+        <div class="calc-input-row">
+          <input id="barcodeQty" type="number" min="1" placeholder="Ej: 5" />
+          <button type="button" class="op-icon-btn secondary" onclick="openCalcForInput('barcodeQty')" title="Calculadora">🧮</button>
+        </div>
+        <div class="btn-row" style="margin-top:10px;">
+          <button type="button" onclick="barcodeAceptarCantidad()">Aceptar</button>
+          <button type="button" class="secondary" onclick="barcodeCancelarCantidad()">Cancelar</button>
+        </div>
+      </div>
+    </div>
 
     <div class="btn-row">
       <button type="button" class="secondary" onclick="cerrarModalBarcode()">Cerrar</button>
@@ -789,6 +805,55 @@
 
 <!-- SheetJS para Excel -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+
+
+<!-- ================= RECEPCION: MODAL NUEVO ALIAS ================= -->
+<div id="modalRecepNuevoProd" class="modal">
+  <div class="modal-card">
+    <h3 id="recNewTitle">Agregar alias nuevo</h3>
+    <p class="muted">Registra un producto cuando el ALIAS no existe.</p>
+
+    <label class="label">ALIAS</label>
+    <input id="recNewAlias" placeholder="ALIAS" autocomplete="off" />
+
+    <label class="label">Nombre del producto</label>
+    <input id="recNewNombre" placeholder="Ej: Tornillo 1/2" autocomplete="off" />
+
+    <label class="label">Código (opcional)</label>
+    <div class="addmov-grid">
+      <input id="recNewCodigo" placeholder="Ej: 12-0065lb" autocomplete="off" />
+      <button type="button" class="op-icon-btn secondary" onclick="abrirModalRecepSugCodigo()" title="Sugerir código">🔎</button>
+    </div>
+
+    <div id="recNewError" class="pin-error hidden">❌ Completa ALIAS y nombre.</div>
+
+    <div class="btn-row">
+      <button type="button" onclick="guardarRecepNuevoProd()">Guardar</button>
+      <button type="button" class="secondary" onclick="cerrarModalRecepNuevoProd()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= RECEPCION: MODAL SUGERIR CODIGO ================= -->
+<div id="modalRecepSugCodigo" class="modal">
+  <div class="modal-card">
+    <h3>Sugerir código</h3>
+    <p class="muted">Se muestran productos similares para continuar la secuencia.</p>
+
+    <div class="addmov-grid">
+      <input id="recSugQuery" placeholder="Nombre a comparar" autocomplete="off" oninput="renderRecepSugCodigoList()" />
+      <button type="button" class="secondary op-icon-btn" onclick="renderRecepSugCodigoList(true)" title="Actualizar">⟳</button>
+    </div>
+
+    <div id="recSugList" class="modal-list" style="margin-top:10px;"></div>
+
+    <div class="btn-row">
+      <button type="button" class="secondary" onclick="cerrarModalRecepSugCodigo()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
 
 <script src="app.js"></script>
 </body>
