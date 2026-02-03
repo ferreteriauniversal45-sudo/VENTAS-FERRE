@@ -324,6 +324,23 @@
     <h3 id="addMovTitulo">Agregar producto</h3>
     <p id="addMovSub" class="muted">Escribe el código o usa la lupa para buscarlo por nombre.</p>
 
+    <!-- ⚡ Conteo: función rápida (agregar automático) -->
+    <div id="addMovQuickWrap" class="card-lite hidden" style="margin-top:10px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <div>
+          <div style="font-weight:900">⚡ Función rápida</div>
+          <div class="muted" style="font-size:12px;">Al ingresar o escanear, se agrega automáticamente al conteo con la cantidad configurada.</div>
+        </div>
+        <button type="button" id="addMovQuickToggle" class="secondary small" onclick="toggleAddMovQuick()">Deshabilitada</button>
+      </div>
+
+      <div id="addMovQuickQtyRow" class="hidden" style="margin-top:10px;">
+        <label class="label">Cantidad automática</label>
+        <input id="addMovQuickQty" type="number" min="1" value="1" oninput="onAddMovQuickQtyInput(this.value)" />
+        <div class="muted" style="font-size:12px; margin-top:6px;">Tip: usa el botón 🏷️ para escanear ALIAS en modo continuo.</div>
+      </div>
+    </div>
+
     <div class="addmov-grid triple">
       <input id="addMovCodigo" placeholder="12-0065lb" />
       <button type="button" class="op-icon-btn secondary" onclick="abrirBusquedaProductoParaAddMov()" title="Buscar">🔎</button>
@@ -334,8 +351,8 @@
 
     <input id="addMovProducto" placeholder="Producto" disabled />
 
-    <label class="label">Cantidad</label>
-    <div class="calc-input-row">
+    <label class="label" id="addMovQtyLabel">Cantidad</label>
+    <div class="calc-input-row" id="addMovQtyRow">
       <input id="addMovQty" type="number" min="1" placeholder="Ej: 5" />
       <button type="button" class="op-icon-btn secondary" onclick="openCalcForInput('addMovQty')" title="Calculadora">🧮</button>
     </div>
