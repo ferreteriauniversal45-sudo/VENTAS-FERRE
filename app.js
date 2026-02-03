@@ -3217,6 +3217,44 @@ async function abrirBarcodeOperador(){
 async function abrirBarcodeAddMov(){
   // desde el modal rápido "Agregar producto" (Operador)
   try { await ensureCatalogoCargado(); } catch {}
+
+  const isConteo = String(addMovTipo || "").toUpperCase() === "CONTEO";
+  const quick = isConteo && isConteoQuickEnabled();
+
+  // ⚡ CONTEO rápido: escaneo continuo (no pide cantidad, no cierra el modal de barras)
+  if (quick) {
+    const fixedQty = getConteoQuickQty();
+    abrirModalBarcode(
+      "Conteo rápido por barras",
+      `Escanea el código de barras (ALIAS). Se agregará automáticamente al conteo con cantidad ${fixedQty}. (Esc para salir)`,
+      (prod) => {
+        try {
+          if (!conteoDoc) {
+            try { showToast("No hay conteo activo"); } catch {}
+          } else {
+            const qty = getConteoQuickQty();
+            addOrSumMovItem(conteoDoc.items, prod.codigo, prod.producto || "", qty, { setAgregadoTs: true });
+            renderFilasConteo();
+            actualizarPreviewConteo();
+            try { showToast(`Agregado: ${qty} x ${prod.producto || prod.codigo}`); } catch {}
+          }
+        } catch {}
+
+        // Preparar para el siguiente escaneo
+        try { __barcodePendingProd = null; } catch {}
+        try { __barcodeHandled = false; } catch {}
+
+        setTimeout(() => {
+          try { if (el("barcodeInput")) el("barcodeInput").value = ""; } catch {}
+          try { __barcodeLastAlias = ""; } catch {}
+          try { _setBarcodeStatus("", false); } catch {}
+          try { el("barcodeInput")?.focus(); } catch {}
+        }, 180);
+      }
+    );
+    return;
+  }
+
   abrirModalBarcode(
     "Agregar por barras",
     "Escribe o escanea el código de barras (ALIAS). Al encontrarlo, se llenará el producto y podrás ingresar la cantidad.",
@@ -6046,6 +6084,80 @@ function seleccionarProductoOperador(codigo){
 /* ===== Modal: Agregar producto (OPERADOR - ENTRADAS / SALIDAS) ===== */
 let addMovTipo = "ENTRADA";
 
+// ✅ Conteo (Operador): modo rápido en modal "Agregar producto"
+// - Si está habilitado, al reconocer un producto (por código o por barras) se agrega automáticamente
+//   con una cantidad fija (configurable) y se deja listo para el siguiente escaneo.
+let __opConteoQuickEnabled = false;
+let __opConteoQuickQty = 1;
+
+try {
+  __opConteoQuickEnabled = JSON.parse(localStorage.getItem("opConteoQuickEnabled") || "false");
+  __opConteoQuickQty = Math.max(1, Number(localStorage.getItem("opConteoQuickQty") || "1") || 1);
+} catch {
+  __opConteoQuickEnabled = false;
+  __opConteoQuickQty = 1;
+}
+
+function isConteoQuickEnabled(){
+  return !!__opConteoQuickEnabled;
+}
+function getConteoQuickQty(){
+  return Math.max(1, Number(__opConteoQuickQty || 1) || 1);
+}
+
+function renderAddMovQuickUi(){
+  const wrap = el("addMovQuickWrap");
+  const btn = el("addMovQuickToggle");
+  const row = el("addMovQuickQtyRow");
+  const qty = el("addMovQuickQty");
+
+  const qtyLabel = el("addMovQtyLabel");
+  const qtyRow = el("addMovQtyRow");
+  const qtyInput = el("addMovQty");
+
+  const isConteo = (String(addMovTipo || "").toUpperCase() === "CONTEO");
+  const enabled = isConteo && isConteoQuickEnabled();
+
+  // Solo aplica a CONTEO
+  if (!wrap) return;
+  wrap.classList.toggle("hidden", !isConteo);
+
+  if (btn) btn.textContent = enabled ? "Habilitada" : "Deshabilitada";
+  if (row) row.classList.toggle("hidden", !enabled);
+
+  if (qty) qty.value = String(getConteoQuickQty());
+
+  // UI cantidad manual: ocultar si está en modo rápido
+  if (qtyLabel) qtyLabel.classList.toggle("hidden", enabled);
+  if (qtyRow) qtyRow.classList.toggle("hidden", enabled);
+
+  // Aun si ocultamos, dejamos un valor “de respaldo” por si presionan Agregar.
+  if (qtyInput) {
+    if (enabled) {
+      qtyInput.value = String(getConteoQuickQty());
+    }
+  }
+}
+
+let __addMovAutoLock = false;
+
+function toggleAddMovQuick(){
+  if (String(addMovTipo || "").toUpperCase() !== "CONTEO") return;
+  __opConteoQuickEnabled = !__opConteoQuickEnabled;
+  try { localStorage.setItem("opConteoQuickEnabled", JSON.stringify(__opConteoQuickEnabled)); } catch {}
+  renderAddMovQuickUi();
+  setTimeout(() => el("addMovCodigo")?.focus(), 50);
+}
+
+function onAddMovQuickQtyInput(v){
+  const n = Math.max(1, Number(String(v || "").trim()) || 1);
+  __opConteoQuickQty = n;
+  try { localStorage.setItem("opConteoQuickQty", String(n)); } catch {}
+
+  // si está visible, sincronizar el input oculto de qty para evitar validación
+  try { if (el("addMovQty")) el("addMovQty").value = String(n); } catch {}
+}
+
 function abrirModalAddMovItem(tipo){
   addMovTipo = String(tipo || "ENTRADA").toUpperCase();
 
@@ -6066,6 +6178,9 @@ function abrirModalAddMovItem(tipo){
     el("addMovQty").min = (addMovTipo === "CONTEO") ? "0" : "1";
   }
   if (el("addMovSug")) el("addMovSug").innerHTML = "";
+
+  // UI extra de CONTEO (función rápida)
+  try { renderAddMovQuickUi(); } catch {}
 
   openModal("modalAddMovItem");
   setTimeout(() => el("addMovCodigo")?.focus(), 50);
@@ -6090,6 +6205,41 @@ function onAddMovCodigoInput(val){
 
   const prod = getProdByCodigo(formatted);
   if (prodEl) prodEl.value = prod ? (prod.producto || "") : "";
+
+  // ⚡ CONTEO: modo rápido => agregar automático al reconocer el producto
+  if (
+    String(addMovTipo || "").toUpperCase() === "CONTEO" &&
+    isConteoQuickEnabled() &&
+    !!prod &&
+    !!String(formatted || "").trim() &&
+    !__addMovAutoLock
+  ) {
+    __addMovAutoLock = true;
+
+    try {
+      if (!conteoDoc) {
+        try { showToast("No hay conteo activo"); } catch {}
+        return;
+      }
+
+      const qty = getConteoQuickQty();
+      addOrSumMovItem(conteoDoc.items, formatted, prod.producto || "", qty, { setAgregadoTs: true });
+      renderFilasConteo();
+      actualizarPreviewConteo();
+      try { showToast(`Agregado: ${qty} x ${prod.producto || formatted}`); } catch {}
+
+      // limpiar y dejar listo para el siguiente
+      try { if (el("addMovCodigo")) el("addMovCodigo").value = ""; } catch {}
+      try { if (el("addMovProducto")) el("addMovProducto").value = ""; } catch {}
+      try { if (el("addMovSug")) el("addMovSug").innerHTML = ""; } catch {}
+
+      setTimeout(() => el("addMovCodigo")?.focus(), 50);
+    } finally {
+      setTimeout(() => { __addMovAutoLock = false; }, 120);
+    }
+
+    return;
+  }
 
   updateSugerenciasAddMov();
 }
@@ -6163,8 +6313,16 @@ function confirmarAddMovItem(){
     return;
   }
 
-  const qtyInput = String(el("addMovQty")?.value ?? "").trim();
-  const qtyNum = Number(qtyInput);
+  let qtyInput = String(el("addMovQty")?.value ?? "").trim();
+  let qtyNum = Number(qtyInput);
+
+  // ⚡ Si CONTEO y modo rápido, permitir cantidad vacía (usa la configurada)
+  if (String(addMovTipo || "").toUpperCase() === "CONTEO" && isConteoQuickEnabled()) {
+    if (qtyInput === "" || Number.isNaN(qtyNum)) {
+      qtyNum = getConteoQuickQty();
+      qtyInput = String(qtyNum);
+    }
+  }
 
   if (qtyInput === "" || Number.isNaN(qtyNum)) {
     alert("Ingresa una cantidad válida.");
@@ -6257,7 +6415,19 @@ function addOrSumMovItem(arr, codigo, producto, qty, opts){
 // Eventos del modal (input + Enter)
 el("addMovCodigo")?.addEventListener("input", (e) => onAddMovCodigoInput(e.target.value));
 el("addMovCodigo")?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") el("addMovQty")?.focus();
+  if (e.key === "Enter") {
+    e.preventDefault();
+
+    // ⚡ CONTEO rápido: muchos lectores mandan Enter al final.
+    // Re-evaluar y (si corresponde) auto-agregar; si no, comportamiento normal.
+    if (String(addMovTipo || "").toUpperCase() === "CONTEO" && isConteoQuickEnabled()) {
+      try { onAddMovCodigoInput(e.target.value); } catch {}
+      try { el("addMovCodigo")?.focus(); } catch {}
+      return;
+    }
+
+    el("addMovQty")?.focus();
+  }
 });
 el("addMovQty")?.addEventListener("keydown", (e) => {
   if (e.key === "Enter") confirmarAddMovItem();
