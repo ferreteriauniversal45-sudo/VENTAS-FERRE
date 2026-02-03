@@ -19,10 +19,21 @@ const PINS = {
   VENDEDOR_LEONARDI: "VENTASLEO2026",
   ADMIN: "ADMIN2024",
   BODEGUERO: "1234",
-  VISUALIZADOR: "VISUAL2026"
+  VISUALIZADOR: "VISUAL2026",
+  RECEPCION: "ferreu2026"
 };
 
 const EMPRESA_RTN = "0301-1964-008634";
+
+
+
+/* ================= RECEPCION: STATE ================= */
+let recepcionCatalogoLocal = null;     // { [alias]: { alias, producto, codigo, createdAtISO } }
+let recepcionIngresos = null;          // array de ingresos guardados
+let recepcionDraftIngreso = null;      // borrador actual
+let recepcionIngresoDoc = null;        // ingreso en edición / captura
+let recepcionEditId = null;            // id del ingreso editado (si aplica)
+let recepcionLoaded = false;
 
 const PRICE_TYPES = ["precio","precioA","precioB","precioC","mayoreo","precioVendedor"];
 const PRICE_LABELS = {
@@ -1662,6 +1673,13 @@ function startApp(){
       // Importante: retrasar para evitar TDZ (hay variables/lets definidas más abajo)
       setTimeout(() => renderOperadorHomeDashboard(), 0);
     }
+  } else if (role === "RECEPCION") {
+    headerTitle.textContent = "Recepción";
+    contenido.classList.remove("hidden");
+    setTimeout(() => {
+      try { ensureRecepcionStateLoaded(); } catch {}
+      try { renderRecepcionHome(); } catch {}
+    }, 0);
   } else if (role === "VISUALIZADOR") {
     headerTitle.textContent = "Inventario";
     abrirConsultaInventarioVendedor();
@@ -2198,6 +2216,16 @@ function volverHome(){
       if (operadorHomeUI) operadorHomeUI.classList.remove("hidden");
       setTimeout(() => renderOperadorHomeDashboard(), 0);
     }
+    return;
+  }
+
+  if (role === "RECEPCION") {
+    headerTitle.textContent = "Recepción";
+    contenido.classList.remove("hidden");
+    setTimeout(() => {
+      try { ensureRecepcionStateLoaded(); } catch {}
+      try { renderRecepcionHome(); } catch {}
+    }, 0);
     return;
   }
 
@@ -3060,6 +3088,12 @@ function cerrarModalProductos(){
 
 /* ================= MODAL BARCODE (ALIAS) ================= */
 let __barcodeHandled = false;
+let __barcodeAllowNew = false;
+let __barcodeLookupFn = null;
+let __barcodeLastAlias = "";
+let __barcodePromptQty = false;
+let __barcodePendingProd = null;
+
 
 function _setBarcodeStatus(html, show = true){
   const st = el("barcodeStatus");
@@ -3073,7 +3107,33 @@ function _setBarcodeStatus(html, show = true){
   st.innerHTML = html;
 }
 
-function abrirModalBarcode(titulo = "Buscar por código de barras", subtitulo = "Escribe o escanea el código de barras (ALIAS).", onFound = null){
+function _barcodeToggleConfirm(show){
+  const wrap = el("barcodeConfirm");
+  const qty = el("barcodeQty");
+  const input = el("barcodeInput");
+
+  if (wrap) {
+    if (show) wrap.classList.remove("hidden");
+    else wrap.classList.add("hidden");
+  }
+
+  if (input) input.disabled = !!show;
+
+  if (show) {
+    if (qty) {
+      if (!qty.value) qty.value = 1;
+      setTimeout(() => { try { qty.focus(); qty.select?.(); } catch {} }, 50);
+    }
+  } else {
+    if (qty) qty.value = "";
+    if (input) {
+      input.value = "";
+      setTimeout(() => { try { input.focus(); } catch {} }, 50);
+    }
+  }
+}
+
+function abrirModalBarcode(titulo = "Buscar por código de barras", subtitulo = "Escribe o escanea el código de barras (ALIAS).", onFoundOrOpts = null){
   __barcodeHandled = false;
 
   const t = el("barcodeTitle");
@@ -3084,8 +3144,30 @@ function abrirModalBarcode(titulo = "Buscar por código de barras", subtitulo = 
   const input = el("barcodeInput");
   if (input) input.value = "";
 
-  // guardar callback
-  window.__barcodeOnFound = (typeof onFound === "function") ? onFound : null;
+  // reset
+__barcodeAllowNew = false;
+__barcodeLookupFn = null;
+__barcodeLastAlias = "";
+__barcodePromptQty = false;
+__barcodePendingProd = null;
+window.__barcodeOnNewAlias = null;
+try { _barcodeToggleConfirm(false); } catch {}
+try { el("barcodeInput")?.removeAttribute("disabled"); } catch {}
+
+// resolver callback/opciones
+let onFound = null;
+if (typeof onFoundOrOpts === "function") {
+  onFound = onFoundOrOpts;
+} else if (onFoundOrOpts && typeof onFoundOrOpts === "object") {
+  onFound = (typeof onFoundOrOpts.onFound === "function") ? onFoundOrOpts.onFound : null;
+  __barcodeAllowNew = !!onFoundOrOpts.allowNewAlias;
+  __barcodeLookupFn = (typeof onFoundOrOpts.lookupFn === "function") ? onFoundOrOpts.lookupFn : null;
+  __barcodePromptQty = !!onFoundOrOpts.promptQty;
+  window.__barcodeOnNewAlias = (typeof onFoundOrOpts.onNewAlias === "function") ? onFoundOrOpts.onNewAlias : null;
+}
+
+// guardar callback
+window.__barcodeOnFound = (typeof onFound === "function") ? onFound : null;
 
   _setBarcodeStatus("", false);
   openModal("modalBarcode");
@@ -3094,6 +3176,14 @@ function abrirModalBarcode(titulo = "Buscar por código de barras", subtitulo = 
 
 function cerrarModalBarcode(){
   window.__barcodeOnFound = null;
+  window.__barcodeOnNewAlias = null;
+  __barcodeAllowNew = false;
+  __barcodeLookupFn = null;
+  __barcodeLastAlias = "";
+  __barcodePromptQty = false;
+  __barcodePendingProd = null;
+  try { _barcodeToggleConfirm(false); } catch {}
+  try { el("barcodeInput")?.removeAttribute("disabled"); } catch {}
   closeModal("modalBarcode");
 }
 
@@ -3152,12 +3242,18 @@ function onBarcodeInput(val){
     return;
   }
 
-  const prod = getProdByAlias(alias);
+  __barcodeLastAlias = alias;
+
+  const prod = (__barcodeLookupFn ? __barcodeLookupFn(alias) : getProdByAlias(alias));
 
   // Mostrar feedback (cuando ya hay varios dígitos)
   if (!prod) {
     if (alias.length >= 6) {
-      _setBarcodeStatus(`<b>No encontrado</b><div class="muted" style="margin-top:4px;">ALIAS: ${escapeHtml(alias)}</div>`, true);
+      _setBarcodeStatus(
+        `<b>No encontrado</b><div class="muted" style="margin-top:4px;">ALIAS: ${escapeHtml(alias)}</div>`
+        + (__barcodeAllowNew ? `<div style="margin-top:8px;"><button type="button" class="secondary small" onclick="barcodeAgregarAlias()">➕ Agregar alias nuevo</button></div>` : ``),
+        true
+      );
     } else {
       _setBarcodeStatus("", false);
     }
@@ -3169,6 +3265,15 @@ function onBarcodeInput(val){
      <div class="muted" style="margin-top:4px;">Código: <b>${escapeHtml(prod.codigo)}</b>${prod.alias ? ` • Barras: <b>${escapeHtml(prod.alias)}</b>` : ""}</div>`,
     true
   );
+
+  // Si este flujo requiere confirmar cantidad (ej: Recepción)
+  if (__barcodePromptQty) {
+    __barcodePendingProd = prod;
+    __barcodeHandled = true;
+    try { el("barcodeQty") && (el("barcodeQty").value = 1); } catch {}
+    try { _barcodeToggleConfirm(true); } catch {}
+    return;
+  }
 
   __barcodeHandled = true;
   setTimeout(() => {
@@ -3197,6 +3302,79 @@ if (barcodeInput) {
   });
 }
 
+const barcodeQty = el("barcodeQty");
+if (barcodeQty) {
+  barcodeQty.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      try { barcodeCancelarCantidad(); } catch {}
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      try { barcodeAceptarCantidad(); } catch {}
+      return;
+    }
+  });
+}
+
+function barcodeAceptarCantidad(){
+  if (!__barcodePendingProd) return;
+
+  const qtyEl = el("barcodeQty");
+  let qty = Number(qtyEl ? qtyEl.value : 0);
+  if (!isFinite(qty) || qty <= 0) {
+    try { showToast("Ingresa una cantidad válida"); } catch {}
+    try { qtyEl?.focus(); } catch {}
+    return;
+  }
+
+  // Ejecutar callback con (prod, qty)
+  try {
+    const fn = window.__barcodeOnFound;
+    if (typeof fn === "function") fn(__barcodePendingProd, qty);
+  } catch {}
+
+  // Preparar para siguiente escaneo
+  __barcodePendingProd = null;
+  __barcodeHandled = false;
+
+  // dejar visible el status del último producto, pero volver a modo escaneo
+  try { _barcodeToggleConfirm(false); } catch {}
+  try { el("barcodeInput")?.removeAttribute("disabled"); } catch {}
+}
+
+function barcodeCancelarCantidad(){
+  __barcodePendingProd = null;
+  __barcodeHandled = false;
+  try { _barcodeToggleConfirm(false); } catch {}
+  try { el("barcodeInput")?.removeAttribute("disabled"); } catch {}
+  try { _setBarcodeStatus("", false); } catch {}
+}
+
+
+
+
+
+
+
+function barcodeAgregarAlias(){
+  const alias = __barcodeLastAlias || normalizeAlias(el("barcodeInput")?.value || "");
+  if (!alias) return;
+
+  try { cerrarModalBarcode(); } catch {}
+
+  try {
+    const fn = window.__barcodeOnNewAlias;
+    if (typeof fn === "function") {
+      fn(alias);
+      return;
+    }
+  } catch {}
+
+  // fallback: si existe el modal de recepción
+  try { abrirModalRecepNuevoProd(alias); } catch {}
+}
 
 function renderProductosModal(){
   const q = (el("buscarProductoModal").value || "").toLowerCase().trim();
@@ -10776,3 +10954,896 @@ async function crearPdfCeramica(docData){
   const fname = `CALCULO_CERAMICA_${new Date().toISOString().slice(0,10)}.pdf`;
   setLastFile(blob, fname, "Cálculo de cerámica", "Cálculo de metros cuadrados de cerámica.", "application/pdf");
 }
+
+
+/* ================= RECEPCION: INGRESOS + HISTORIAL ================= */
+
+function ensureRecepcionStateLoaded(force = false){
+  if (recepcionLoaded && !force) return;
+
+  try { recepcionCatalogoLocal = JSON.parse(localStorage.getItem("recepcionCatalogoLocal") || "{}"); }
+  catch { recepcionCatalogoLocal = {}; }
+
+  try { recepcionIngresos = JSON.parse(localStorage.getItem("recepcionIngresos") || "[]"); }
+  catch { recepcionIngresos = []; }
+
+  try { recepcionDraftIngreso = JSON.parse(localStorage.getItem("recepcionDraftIngreso") || "null"); }
+  catch { recepcionDraftIngreso = null; }
+
+  recepcionLoaded = true;
+}
+
+function persistRecepcionIngresos(){
+  try { localStorage.setItem("recepcionIngresos", JSON.stringify(recepcionIngresos || [])); } catch {}
+}
+
+function persistRecepcionCatalogo(){
+  try { localStorage.setItem("recepcionCatalogoLocal", JSON.stringify(recepcionCatalogoLocal || {})); } catch {}
+}
+
+function setRecepcionDraft(doc){
+  recepcionDraftIngreso = doc || null;
+  if (!doc) {
+    try { localStorage.removeItem("recepcionDraftIngreso"); } catch {}
+  } else {
+    try { localStorage.setItem("recepcionDraftIngreso", JSON.stringify(doc)); } catch {}
+  }
+}
+
+function newRecepcionIngreso(){
+  const now = new Date();
+  return {
+    id: Date.now(),
+    fechaISO: now.toISOString().slice(0,10),
+    proveedor: "",
+    referencia: "",
+    notas: "",
+    items: [],
+    createdAtISO: now.toISOString(),
+    updatedAtISO: now.toISOString()
+  };
+}
+
+function renderRecepcionHome(){
+  ensureRecepcionStateLoaded();
+
+  vendedorHome.classList.add("hidden");
+  operadorHome.classList.add("hidden");
+  contenido.classList.remove("hidden");
+
+  const hasDraft = !!(recepcionDraftIngreso && Array.isArray(recepcionDraftIngreso.items) && recepcionDraftIngreso.items.length);
+
+  contenido.innerHTML = `
+    <div class="card">
+      <strong>📥 Recepción</strong>
+      <div class="muted">Registrar ingresos de proveedores por ALIAS (código de barras).</div>
+    </div>
+
+    ${hasDraft ? `
+      <div class="card-lite">
+        <strong>📝 Borrador encontrado</strong>
+        <div class="muted" style="margin-top:6px;">
+          Fecha: <b>${escapeHtml(recepcionDraftIngreso.fechaISO || "")}</b> · Items: <b>${(recepcionDraftIngreso.items||[]).length}</b>
+        </div>
+        <div class="btn-row" style="margin-top:10px;">
+          <button type="button" onclick="abrirRecepcionNuevoIngreso(false)">Continuar borrador</button>
+          <button type="button" class="secondary" onclick="borrarRecepcionBorrador()">🧹 Borrar borrador</button>
+        </div>
+      </div>
+    ` : ""}
+
+    <div class="card-lite">
+      <div class="btn-row">
+        <button type="button" onclick="abrirRecepcionNuevoIngreso(true)">📥 Nuevo ingreso</button>
+        <button type="button" class="secondary" onclick="abrirRecepcionHistorial()">📚 Historial de ingresos</button>
+      </div>
+    </div>
+  `;
+}
+
+function borrarRecepcionBorrador(){
+  setRecepcionDraft(null);
+  recepcionIngresoDoc = null;
+  recepcionEditId = null;
+  alert("🧹 Borrador eliminado.");
+  renderRecepcionHome();
+}
+
+function abrirRecepcionNuevoIngreso(forceNew = true){
+  ensureRecepcionStateLoaded();
+
+  recepcionEditId = null;
+
+  if (!forceNew && recepcionDraftIngreso) {
+    recepcionIngresoDoc = recepcionDraftIngreso;
+  } else {
+    recepcionIngresoDoc = newRecepcionIngreso();
+    setRecepcionDraft(recepcionIngresoDoc);
+  }
+
+  renderRecepcionIngreso();
+}
+
+function abrirRecepcionHistorial(){
+  ensureRecepcionStateLoaded();
+
+  vendedorHome.classList.add("hidden");
+  operadorHome.classList.add("hidden");
+  contenido.classList.remove("hidden");
+
+  contenido.innerHTML = `
+    <button type="button" class="secondary" onclick="renderRecepcionHome()">⬅ Volver</button>
+
+    <div class="card">
+      <strong>📚 Historial de ingresos</strong>
+      <div class="muted">Abrir, compartir o eliminar ingresos guardados localmente.</div>
+    </div>
+
+    <div class="card-lite">
+      <label class="label">Buscar</label>
+      <input id="recHistQ" placeholder="Proveedor / referencia / producto / código" oninput="renderRecepcionHistorialList()" />
+      <div class="btn-row" style="margin-top:10px;">
+        <button type="button" onclick="abrirRecepcionNuevoIngreso(true)">📥 Nuevo ingreso</button>
+        <button type="button" class="secondary" onclick="renderRecepcionHistorialList(true)">⟳ Actualizar</button>
+      </div>
+    </div>
+
+    <div id="recHistList"></div>
+  `;
+
+  renderRecepcionHistorialList();
+}
+
+function renderRecepcionHistorialList(force = false){
+  ensureRecepcionStateLoaded();
+
+  const list = el("recHistList");
+  if (!list) return;
+
+  const q = String(el("recHistQ")?.value || "").toLowerCase().trim();
+
+  const docs = (Array.isArray(recepcionIngresos) ? recepcionIngresos : [])
+    .slice()
+    .sort((a,b) => (b.updatedAtISO || b.createdAtISO || "").localeCompare(a.updatedAtISO || a.createdAtISO || ""));
+
+  const filtered = !q ? docs : docs.filter(d => {
+    const proveedor = String(d.proveedor || "").toLowerCase();
+    const ref = String(d.referencia || "").toLowerCase();
+    const fecha = String(d.fechaISO || "").toLowerCase();
+    const items = Array.isArray(d.items) ? d.items : [];
+    const inItems = items.some(it => {
+      const p = String(it.producto || "").toLowerCase();
+      const c = String(it.codigo || "").toLowerCase();
+      const a = String(it.alias || "").toLowerCase();
+      return p.includes(q) || c.includes(q) || a.includes(q);
+    });
+    return proveedor.includes(q) || ref.includes(q) || fecha.includes(q) || inItems;
+  });
+
+  if (!filtered.length) {
+    list.innerHTML = `
+      <div class="card">
+        <strong>No hay ingresos guardados.</strong>
+        <div class="muted">Cuando guardes un ingreso, aparecerá aquí.</div>
+      </div>
+    `;
+    return;
+  }
+
+  list.innerHTML = filtered.map(d => {
+    const items = Array.isArray(d.items) ? d.items : [];
+    const totalItems = items.length;
+    const totalUnidades = items.reduce((s,it) => s + (Number(it.cantidad || 0) || 0), 0);
+
+    return `
+      <div class="card-lite">
+        <strong>📄 ${escapeHtml(d.fechaISO || "")}${d.proveedor ? ` • ${escapeHtml(d.proveedor)}` : ""}</strong>
+        <div class="muted" style="margin-top:6px;">
+          ${d.referencia ? `Ref: <b>${escapeHtml(d.referencia)}</b> • ` : ""}
+          Items: <b>${totalItems}</b> • Unidades: <b>${totalUnidades}</b>
+        </div>
+        <div class="btn-row" style="margin-top:10px;">
+          <button type="button" onclick="abrirRecepcionIngresoEdit(${JSON.stringify(d.id)})">Abrir</button>
+          <button type="button" class="secondary" onclick="recepCompartirPdfById(${JSON.stringify(d.id)})">📄 PDF</button>
+          <button type="button" class="secondary" onclick="recepCompartirExcelById(${JSON.stringify(d.id)})">📊 Excel</button>
+          <button type="button" class="danger" onclick="eliminarRecepIngreso(${JSON.stringify(d.id)})">🗑️</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function abrirRecepcionIngresoEdit(id){
+  ensureRecepcionStateLoaded();
+  const d = (Array.isArray(recepcionIngresos) ? recepcionIngresos : []).find(x => String(x?.id) === String(id));
+  if (!d) return alert("No se encontró el ingreso.");
+  recepcionIngresoDoc = JSON.parse(JSON.stringify(d));
+  recepcionEditId = d.id;
+  setRecepcionDraft(recepcionIngresoDoc);
+  renderRecepcionIngreso();
+}
+
+function eliminarRecepIngreso(id){
+  ensureRecepcionStateLoaded();
+  if (!confirm("¿Eliminar este ingreso del historial?")) return;
+  recepcionIngresos = (Array.isArray(recepcionIngresos) ? recepcionIngresos : []).filter(x => String(x?.id) !== String(id));
+  persistRecepcionIngresos();
+  renderRecepcionHistorialList(true);
+}
+
+function renderRecepcionIngreso(){
+  ensureRecepcionStateLoaded();
+
+  const d = recepcionIngresoDoc || newRecepcionIngreso();
+  recepcionIngresoDoc = d;
+
+  const isEdit = !!recepcionEditId;
+
+  vendedorHome.classList.add("hidden");
+  operadorHome.classList.add("hidden");
+  contenido.classList.remove("hidden");
+
+  contenido.innerHTML = `
+    <button type="button" class="secondary" onclick="${isEdit ? "abrirRecepcionHistorial()" : "renderRecepcionHome()"}">⬅ Volver</button>
+
+    <div class="card">
+      <strong>📥 ${isEdit ? "Editar ingreso" : "Recibir productos"}</strong>
+      <div class="muted">${isEdit ? "Modifica el ingreso y guarda cambios." : "Escanea por ALIAS para agregar productos."}</div>
+    </div>
+
+    <div class="card-lite">
+      <div class="op-grid">
+        <div class="col">
+          <label class="label">Fecha</label>
+          <input type="date" id="recFecha" value="${escapeHtml(d.fechaISO || "")}" onchange="onRecFecha(this.value)" />
+        </div>
+        <div class="col">
+          <label class="label">Proveedor</label>
+          <input id="recProveedor" placeholder="Opcional" value="${escapeHtml(d.proveedor || "")}" oninput="onRecProveedor(this.value)" />
+        </div>
+      </div>
+
+      <div class="op-grid" style="margin-top:10px;">
+        <div class="col">
+          <label class="label">Factura / Referencia</label>
+          <input id="recRef" placeholder="Opcional" value="${escapeHtml(d.referencia || "")}" oninput="onRecRef(this.value)" />
+        </div>
+        <div class="col">
+          <label class="label">Acciones</label>
+          <div class="btn-row">
+            <button type="button" class="secondary" onclick="abrirBarcodeRecepcion()">🏷️ Escanear ALIAS</button>
+            <button type="button" class="secondary" onclick="abrirModalRecepNuevoProd('')">➕ Agregar alias</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card-lite">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <strong>Productos recibidos</strong>
+        <button type="button" class="secondary small" onclick="abrirBarcodeRecepcion()">🏷️ Barras</button>
+      </div>
+
+      <div class="op-table" style="margin-top:10px;">
+        <div id="recItemsWrap"></div>
+      </div>
+    </div>
+
+    <div class="factura-fija">
+      <div class="factura-card" id="recPreview"></div>
+      <div class="btn-row" style="margin-top:10px;">
+        <button type="button" onclick="guardarIngresoRecepcion()">${isEdit ? "💾 Guardar cambios" : "💾 Guardar ingreso"}</button>
+        <button type="button" class="secondary" onclick="recepCompartirPdfActual()">📄 Compartir PDF</button>
+        <button type="button" class="secondary" onclick="recepCompartirExcelActual()">📊 Compartir Excel</button>
+        <button type="button" class="secondary" onclick="borrarRecepcionBorrador()">🧹 Borrar borrador</button>
+      </div>
+      <div class="btn-row" style="margin-top:10px;">
+        <button type="button" class="secondary" onclick="abrirRecepcionHistorial()">📚 Historial</button>
+        <button type="button" class="secondary" onclick="abrirRecepcionNuevoIngreso(true)">🧾 Nuevo ingreso</button>
+      </div>
+    </div>
+  `;
+
+  renderFilasRecepcionIngreso();
+  actualizarPreviewRecepcionIngreso();
+  setRecepcionDraft(recepcionIngresoDoc);
+}
+
+function onRecFecha(v){
+  if (!recepcionIngresoDoc) return;
+  recepcionIngresoDoc.fechaISO = v;
+  recepTouchDraft();
+}
+
+function onRecProveedor(v){
+  if (!recepcionIngresoDoc) return;
+  recepcionIngresoDoc.proveedor = v;
+  recepTouchDraft();
+}
+
+function onRecRef(v){
+  if (!recepcionIngresoDoc) return;
+  recepcionIngresoDoc.referencia = v;
+  recepTouchDraft();
+}
+
+function recepTouchDraft(){
+  if (!recepcionIngresoDoc) return;
+  recepcionIngresoDoc.updatedAtISO = new Date().toISOString();
+  setRecepcionDraft(recepcionIngresoDoc);
+  actualizarPreviewRecepcionIngreso();
+}
+
+function renderFilasRecepcionIngreso(){
+  const wrap = el("recItemsWrap");
+  if (!wrap) return;
+
+  const items = Array.isArray(recepcionIngresoDoc?.items) ? recepcionIngresoDoc.items : [];
+  if (!items.length) {
+    wrap.innerHTML = `
+      <div class="card" style="margin:0;">
+        <strong>Escanea un producto para empezar.</strong>
+        <div class="muted">Usa “Escanear ALIAS” para agregar productos.</div>
+      </div>
+    `;
+    return;
+  }
+
+  wrap.innerHTML = items.map(it => `
+    <div class="op-row-wrap">
+      <div class="op-row">
+        <div class="op-row-main">
+          <div class="op-row-title">${escapeHtml(it.producto || "Producto")}</div>
+          <div class="op-row-sub muted">
+            ${it.codigo ? `Código: <b>${escapeHtml(it.codigo)}</b>` : `<span class="muted">Sin código</span>`}
+            ${it.alias ? ` • ALIAS: <b>${escapeHtml(it.alias)}</b>` : ``}
+          </div>
+        </div>
+
+        <div class="op-row-actions">
+          <input
+            class="op-qty"
+            type="number"
+            min="0"
+            step="1"
+            value="${escapeHtml(String(it.cantidad ?? 0))}"
+            oninput="onRecItemQty(${JSON.stringify(it.id)}, this.value)"
+          />
+          <button type="button" class="danger small" onclick="eliminarRecItem(${JSON.stringify(it.id)})">✖</button>
+        </div>
+      </div>
+    </div>
+  `).join("");
+}
+
+function onRecItemQty(itemId, v){
+  const items = Array.isArray(recepcionIngresoDoc?.items) ? recepcionIngresoDoc.items : [];
+  const it = items.find(x => String(x?.id) === String(itemId));
+  if (!it) return;
+  it.cantidad = Number(v || 0) || 0;
+  recepTouchDraft();
+}
+
+function eliminarRecItem(itemId){
+  if (!recepcionIngresoDoc) return;
+  recepcionIngresoDoc.items = (recepcionIngresoDoc.items || []).filter(x => String(x?.id) !== String(itemId));
+  recepTouchDraft();
+  renderFilasRecepcionIngreso();
+}
+
+function actualizarPreviewRecepcionIngreso(){
+  const box = el("recPreview");
+  if (!box || !recepcionIngresoDoc) return;
+
+  const items = Array.isArray(recepcionIngresoDoc.items) ? recepcionIngresoDoc.items : [];
+  const totalItems = items.length;
+  const totalUnidades = items.reduce((s,it) => s + (Number(it.cantidad || 0) || 0), 0);
+
+  box.innerHTML = `
+    <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start;">
+      <div>
+        <div style="font-weight:900;">Ingreso Recepción</div>
+        <div class="muted" style="margin-top:4px;">
+          Fecha: <b>${escapeHtml(recepcionIngresoDoc.fechaISO || "")}</b>
+          ${recepcionIngresoDoc.proveedor ? ` • Proveedor: <b>${escapeHtml(recepcionIngresoDoc.proveedor)}</b>` : ""}
+        </div>
+        ${recepcionIngresoDoc.referencia ? `<div class="muted" style="margin-top:4px;">Ref: <b>${escapeHtml(recepcionIngresoDoc.referencia)}</b></div>` : ""}
+      </div>
+      <div style="text-align:right;">
+        <div class="muted">Items</div>
+        <div style="font-weight:900; font-size:18px;">${totalItems}</div>
+        <div class="muted" style="margin-top:2px;">Unidades: <b>${totalUnidades}</b></div>
+      </div>
+    </div>
+
+    ${items.length ? `
+      <div style="margin-top:10px; border-top:1px dashed var(--borde); padding-top:10px;">
+        ${items.slice(0, 8).map(it => `
+          <div style="display:flex; justify-content:space-between; gap:10px;">
+            <div style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+              ${escapeHtml(it.producto || "")}
+            </div>
+            <div style="font-weight:900;">${Number(it.cantidad || 0) || 0}</div>
+          </div>
+        `).join("")}
+        ${items.length > 8 ? `<div class="muted" style="margin-top:6px;">… y ${items.length - 8} más</div>` : ""}
+      </div>
+    ` : ""}
+  `;
+}
+
+function getProdByAliasRecepcion(alias){
+  // primero buscar en catálogo maestro
+  const p = getProdByAlias(alias);
+  if (p) return p;
+
+  // luego buscar en catálogo local de recepción
+  try {
+    ensureRecepcionStateLoaded();
+    const loc = recepcionCatalogoLocal ? recepcionCatalogoLocal[alias] : null;
+    if (loc) {
+      return {
+        codigo: loc.codigo || "",
+        producto: loc.producto || "",
+        alias: loc.alias || alias
+      };
+    }
+  } catch {}
+  return null;
+}
+
+async function abrirBarcodeRecepcion(){
+  if (!recepcionIngresoDoc) abrirRecepcionNuevoIngreso(true);
+
+  try { await ensureCatalogoCargado(); } catch {}
+
+  abrirModalBarcode(
+    "Recibir por ALIAS",
+    "Escanea el código de barras (ALIAS). Al encontrarlo, se mostrará el producto y podrás ingresar la cantidad.",
+    {
+      lookupFn: (alias) => getProdByAliasRecepcion(alias),
+      allowNewAlias: true,
+      onNewAlias: (alias) => abrirModalRecepNuevoProd(alias),
+      promptQty: true,
+      onFound: (prod, qty) => {
+        recepAddProdToIngreso(prod, prod?.alias || null, qty);
+        try { showToast(`Agregado: ${String(prod?.producto || "Producto")} • ${Number(qty||0)} u`); } catch {}
+      }
+    }
+  );
+}
+
+function recepAddProdToIngreso(prod, alias, qty = 1){
+  if (!recepcionIngresoDoc) return;
+
+  let cantidad = Number(qty);
+  if (!isFinite(cantidad) || cantidad <= 0) cantidad = 1;
+
+  const codigo = String(prod?.codigo || "").trim();
+  const nombre = String(prod?.producto || "").trim();
+  const al = String(alias || prod?.alias || "").trim();
+
+  // buscar existente por código o alias
+  const items = Array.isArray(recepcionIngresoDoc.items) ? recepcionIngresoDoc.items : [];
+  let it = null;
+
+  if (codigo) it = items.find(x => String(x?.codigo || "") === codigo);
+  if (!it && al) it = items.find(x => String(x?.alias || "") === al);
+
+  if (it) {
+    it.cantidad = (Number(it.cantidad || 0) || 0) + cantidad;
+    recepTouchDraft();
+    renderFilasRecepcionIngreso();
+    return;
+  }
+
+  const now = new Date();
+  recepcionIngresoDoc.items = items.concat([{
+    id: Date.now() + Math.floor(Math.random()*1000),
+    codigo,
+    alias: al,
+    producto: nombre || "Producto",
+    cantidad: cantidad,
+    agregadoAtISO: now.toISOString(),
+    agregadoAtEpoch: Date.now()
+  }]);
+
+  recepTouchDraft();
+  renderFilasRecepcionIngreso();
+}
+
+
+/* ===== RECEPCION: NUEVO ALIAS ===== */
+
+let __recNewAliasPrefill = "";
+
+
+function abrirModalRecepNuevoProd(alias = ""){
+  ensureRecepcionStateLoaded();
+  __recNewAliasPrefill = normalizeAlias(alias || "") || "";
+
+  if (el("recNewAlias")) el("recNewAlias").value = __recNewAliasPrefill;
+  if (el("recNewNombre")) el("recNewNombre").value = "";
+  if (el("recNewCodigo")) el("recNewCodigo").value = "";
+  if (el("recNewError")) el("recNewError").classList.add("hidden");
+
+  openModal("modalRecepNuevoProd");
+  setTimeout(() => {
+    if (el("recNewNombre")) el("recNewNombre").focus();
+  }, 50);
+}
+
+function cerrarModalRecepNuevoProd(){
+  closeModal("modalRecepNuevoProd");
+}
+
+function guardarRecepNuevoProd(){
+  ensureRecepcionStateLoaded();
+
+  const alias = normalizeAlias(el("recNewAlias")?.value || "") || "";
+  const nombre = String(el("recNewNombre")?.value || "").trim();
+  let codigo = String(el("recNewCodigo")?.value || "").trim();
+
+  if (codigo) codigo = formatCodigoAutoGuion(codigo);
+
+  if (!alias || !nombre) {
+    if (el("recNewError")) el("recNewError").classList.remove("hidden");
+    return;
+  }
+
+  if (!recepcionCatalogoLocal) recepcionCatalogoLocal = {};
+  recepcionCatalogoLocal[alias] = {
+    alias,
+    producto: nombre,
+    codigo: codigo || "",
+    createdAtISO: new Date().toISOString()
+  };
+  persistRecepcionCatalogo();
+
+  cerrarModalRecepNuevoProd();
+
+  // agregar al ingreso si hay uno abierto
+  try { recepAddProdToIngreso({ codigo: codigo || "", producto: nombre, alias }, alias); } catch {}
+}
+
+function abrirModalRecepSugCodigo(){
+  // Necesitamos el nombre para comparar
+  const name = String(el("recNewNombre")?.value || "").trim();
+  if (el("recSugQuery")) el("recSugQuery").value = name;
+  openModal("modalRecepSugCodigo");
+  setTimeout(() => {
+    renderRecepSugCodigoList(true);
+    el("recSugQuery")?.focus();
+  }, 30);
+}
+
+function cerrarModalRecepSugCodigo(){
+  closeModal("modalRecepSugCodigo");
+}
+
+function _normText(s){
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function _simScore(a, b){
+  const A = _normText(a);
+  const B = _normText(b);
+  if (!A || !B) return 0;
+
+  if (A === B) return 1;
+
+  const at = A.split(/\s+/).filter(w => w.length >= 2);
+  const bt = B.split(/\s+/).filter(w => w.length >= 2);
+
+  const setA = new Set(at);
+  const setB = new Set(bt);
+
+  let inter = 0;
+  for (const w of setA) if (setB.has(w)) inter++;
+
+  const union = new Set([...setA, ...setB]).size || 1;
+  let j = inter / union;
+
+  // bonus por substring
+  if (B.includes(A) || A.includes(B)) j += 0.35;
+
+  return Math.min(1, j);
+}
+
+function _nextCodigo(code){
+  const s = String(code || "").trim();
+  const m = s.match(/^(.*?)(\d+)(\D*)$/);
+  if (!m) return "";
+  const prefix = m[1];
+  const digits = m[2];
+  const suffix = m[3] || "";
+  const n = (parseInt(digits, 10) + 1);
+  if (!isFinite(n)) return "";
+  const padded = String(n).padStart(digits.length, "0");
+  return prefix + padded + suffix;
+}
+
+function renderRecepSugCodigoList(force = false){
+  const cont = el("recSugList");
+  if (!cont) return;
+
+  const q = String(el("recSugQuery")?.value || "").trim();
+  if (!q) {
+    cont.innerHTML = `
+      <div class="card" style="margin:0;">
+        <strong>Escribe el nombre del producto.</strong>
+        <div class="muted">Luego selecciona “Usar” o “Siguiente”.</div>
+      </div>
+    `;
+    return;
+  }
+
+  // asegurar catálogo maestro (async sin bloquear UI)
+  try {
+    if (!Array.isArray(catalogo) || !catalogo.length) {
+      cont.innerHTML = `
+        <div class="card" style="margin:0;">
+          <strong>Cargando catálogo...</strong>
+          <div class="muted">Espera un momento y se mostrará la lista.</div>
+        </div>
+      `;
+      Promise.resolve(ensureCatalogoCargado()).then(() => { try { renderRecepSugCodigoList(true); } catch {} });
+      return;
+    }
+  } catch {}
+
+  const matches = (Array.isArray(catalogo) ? catalogo : [])
+    .map(p => ({
+      codigo: String(p.codigo || ""),
+      producto: String(p.producto || ""),
+      score: _simScore(q, p.producto || "")
+    }))
+    .filter(x => x.codigo && x.score > 0.05)
+    .sort((a,b) => b.score - a.score)
+    .slice(0, 20);
+
+  if (!matches.length) {
+    cont.innerHTML = `
+      <div class="card" style="margin:0;">
+        <strong>No se encontraron coincidencias.</strong>
+        <div class="muted">Puedes escribir el código manualmente.</div>
+      </div>
+    `;
+    return;
+  }
+
+  cont.innerHTML = matches.map(m => {
+    const next = _nextCodigo(m.codigo);
+    return `
+      <div class="list-item" style="font-weight:700;">
+        <div><b>${escapeHtml(m.codigo)}</b> — ${escapeHtml(m.producto)}</div>
+        <div class="muted" style="margin-top:4px;">Similitud: ${(m.score*100).toFixed(0)}%</div>
+        <div class="btn-row" style="margin-top:8px;">
+          <button type="button" class="secondary small" onclick="seleccionarRecepCodigo(${JSON.stringify(m.codigo)})">Usar</button>
+          ${next ? `<button type="button" class="secondary small" onclick="seleccionarRecepCodigo(${JSON.stringify(next)})">Siguiente</button>` : ``}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function seleccionarRecepCodigo(codigo){
+  if (el("recNewCodigo")) el("recNewCodigo").value = String(codigo || "");
+  cerrarModalRecepSugCodigo();
+  setTimeout(() => el("recNewCodigo")?.focus(), 40);
+}
+
+/* ===== RECEPCION: GUARDAR + EXPORTAR ===== */
+
+function sanitizeRecepcionDoc(doc){
+  const d = JSON.parse(JSON.stringify(doc || {}));
+  d.items = (Array.isArray(d.items) ? d.items : []).map(it => ({
+    id: it.id || Date.now(),
+    codigo: String(it.codigo || ""),
+    alias: String(it.alias || ""),
+    producto: String(it.producto || ""),
+    cantidad: Number(it.cantidad || 0) || 0,
+    agregadoAtISO: it.agregadoAtISO || "",
+    agregadoAtEpoch: it.agregadoAtEpoch || 0
+  }));
+  return d;
+}
+
+function guardarIngresoRecepcion(silent = false){
+  ensureRecepcionStateLoaded();
+  if (!recepcionIngresoDoc) return;
+
+  const d = sanitizeRecepcionDoc(recepcionIngresoDoc);
+
+  if (!d.fechaISO) d.fechaISO = new Date().toISOString().slice(0,10);
+
+  const itemsValid = d.items.filter(it => it.producto && (it.cantidad > 0));
+  if (!itemsValid.length) {
+    if (!silent) alert("Agrega al menos 1 producto con cantidad > 0.");
+    return false;
+  }
+
+  d.items = itemsValid;
+  d.updatedAtISO = new Date().toISOString();
+  if (!d.createdAtISO) d.createdAtISO = d.updatedAtISO;
+
+  // guardar / actualizar
+  const arr = Array.isArray(recepcionIngresos) ? recepcionIngresos : [];
+  const idx = arr.findIndex(x => String(x?.id) === String(recepcionEditId || d.id));
+
+  if (recepcionEditId && idx >= 0) {
+    arr[idx] = d;
+  } else {
+    arr.unshift(d);
+    recepcionEditId = d.id;
+  }
+
+  recepcionIngresos = arr;
+  persistRecepcionIngresos();
+
+  // ✅ Ya está guardado en historial, limpiamos borrador
+  recepcionIngresoDoc = d;
+  setRecepcionDraft(null);
+
+  if (!silent) alert("✅ Ingreso guardado.");
+  return true;
+}
+
+async function recepCompartirPdfActual(){
+  if (!recepcionIngresoDoc) return;
+  const ok = guardarIngresoRecepcion(true);
+  if (!ok) return;
+  await crearPdfRecepcionIngreso(sanitizeRecepcionDoc(recepcionIngresoDoc));
+  await autoShareLastFile();
+}
+
+async function recepCompartirExcelActual(){
+  if (!recepcionIngresoDoc) return;
+  const ok = guardarIngresoRecepcion(true);
+  if (!ok) return;
+  await crearExcelRecepcionIngreso(sanitizeRecepcionDoc(recepcionIngresoDoc));
+  await autoShareLastFile();
+}
+
+async function recepCompartirPdfById(id){
+  ensureRecepcionStateLoaded();
+  const d = (Array.isArray(recepcionIngresos) ? recepcionIngresos : []).find(x => String(x?.id) === String(id));
+  if (!d) return alert("No se encontró el ingreso.");
+  await crearPdfRecepcionIngreso(sanitizeRecepcionDoc(d));
+  await autoShareLastFile();
+}
+
+async function recepCompartirExcelById(id){
+  ensureRecepcionStateLoaded();
+  const d = (Array.isArray(recepcionIngresos) ? recepcionIngresos : []).find(x => String(x?.id) === String(id));
+  if (!d) return alert("No se encontró el ingreso.");
+  await crearExcelRecepcionIngreso(sanitizeRecepcionDoc(d));
+  await autoShareLastFile();
+}
+
+async function crearPdfRecepcionIngreso(d){
+  const pkg = window.jspdf || {};
+  const jsPDF = pkg.jsPDF;
+
+  if (!jsPDF) {
+    alert("No se encontró jsPDF. Revisa el script en index.html.");
+    return;
+  }
+
+  const PAGE_W = 80;
+  const PAGE_H = 297;
+  const marginL = 4;
+  const marginR = PAGE_W - 4;
+  const lineH = 4.2;
+  const bottomReserve = 18;
+
+  const doc = new jsPDF({ unit: "mm", format: [PAGE_W, PAGE_H] });
+
+  let y = 6;
+
+  function ensureSpace(lines = 1){
+    if (y + (lines * lineH) > (PAGE_H - bottomReserve)) {
+      doc.addPage();
+      y = 6;
+    }
+  }
+
+  function textLine(txt, size = 10, bold = false){
+    ensureSpace(1);
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setFontSize(size);
+    doc.text(String(txt || ""), marginL, y);
+    y += lineH;
+  }
+
+  function textWrap(txt, size = 10, bold = false){
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setFontSize(size);
+    const lines = doc.splitTextToSize(String(txt || ""), marginR - marginL);
+    ensureSpace(lines.length);
+    doc.text(lines, marginL, y);
+    y += lines.length * lineH;
+  }
+
+  // Encabezado
+  textLine("FERRETERÍA UNIVERSAL", 11, true);
+  textLine("INGRESO - RECEPCIÓN", 10, true);
+  y += 1;
+
+  textLine(`Fecha: ${d.fechaISO || ""}`, 9, false);
+  if (d.proveedor) textWrap(`Proveedor: ${d.proveedor}`, 9, false);
+  if (d.referencia) textWrap(`Ref: ${d.referencia}`, 9, false);
+
+  y += 2;
+  doc.setDrawColor(150);
+  doc.line(marginL, y, marginR, y);
+  y += 3;
+
+  // Items
+  const items = Array.isArray(d.items) ? d.items : [];
+  items.forEach((it, idx) => {
+    const qty = Number(it.cantidad || 0) || 0;
+    if (qty <= 0) return;
+
+    textWrap(`${qty} x ${it.producto || "Producto"}`, 9, true);
+
+    const meta = [
+      it.codigo ? `Cod: ${it.codigo}` : null,
+      it.alias ? `ALIAS: ${it.alias}` : null
+    ].filter(Boolean).join(" • ");
+
+    if (meta) textWrap(meta, 8, false);
+
+    y += 1;
+    doc.setDrawColor(220);
+    doc.line(marginL, y, marginR, y);
+    y += 2;
+  });
+
+  const totalUnidades = items.reduce((s,it) => s + (Number(it.cantidad||0)||0), 0);
+
+  y += 2;
+  textLine(`Items: ${items.length}  |  Unidades: ${totalUnidades}`, 9, true);
+
+  const blob = doc.output("blob");
+  const safeDate = String(d.fechaISO || "").replace(/[^\d\-]/g, "");
+  setLastFile(blob, `ingreso-${safeDate || "recepcion"}-${d.id}.pdf`, "Ingreso Recepción", `Ingreso ${d.fechaISO || ""}`, "application/pdf");
+}
+
+async function crearExcelRecepcionIngreso(d){
+  if (!window.XLSX) {
+    alert("No se encontró XLSX. Revisa el script en index.html.");
+    return;
+  }
+
+  const rows = [];
+  rows.push(["Ingreso - Recepción"]);
+  rows.push(["Fecha", d.fechaISO || ""]);
+  rows.push(["Proveedor", d.proveedor || ""]);
+  rows.push(["Referencia", d.referencia || ""]);
+  rows.push([""]);
+  rows.push(["Código", "ALIAS", "Producto", "Cantidad"]);
+
+  const items = Array.isArray(d.items) ? d.items : [];
+  items.forEach(it => {
+    const qty = Number(it.cantidad || 0) || 0;
+    if (qty <= 0) return;
+    rows.push([it.codigo || "", it.alias || "", it.producto || "", qty]);
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Ingreso");
+
+  const excelBuffer = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  const blob = new Blob([excelBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+
+  const safeDate = String(d.fechaISO || "").replace(/[^\d\-]/g, "");
+  setLastFile(blob, `ingreso-${safeDate || "recepcion"}-${d.id}.xlsx`, "Ingreso Recepción (Excel)", `Ingreso ${d.fechaISO || ""}`, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+}
+
