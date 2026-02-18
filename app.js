@@ -1315,6 +1315,101 @@ function normalizeAlias(v){
   return String(v || "").trim().replace(/\s+/g, "");
 }
 
+// ================= NUEVO: Utilidades para inventarios (estructura por cantidad) =================
+async function fetchJsonFirstOk(urls, opts = {}) {
+  const list = Array.isArray(urls) ? urls : [urls];
+  let lastErr = null;
+  for (const u of list) {
+    try { return await fetchJson(u, opts); }
+    catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error("No se pudo cargar JSON (todas las URLs fallaron)");
+}
+
+/**
+ * Construye un índice maestro por código usando:
+ * - cat: catálogo (nombre/departamento/categoría/alias, etc.)
+ * - invP/invA/invT: inventarios (solo {cantidad})
+ * - preciosadmin/preciosLocal: capas de precios
+ *
+ * Nota: con la nueva estructura de inventarios, la metadata del producto se resuelve SOLO desde catálogo.
+ */
+function buildMasterIndex({ catalogoProductos, invP, invA, invT, preciosadmin, preciosLocal }) {
+  const codes = new Set([
+    ...Object.keys(invP || {}),
+    ...Object.keys(invA || {}),
+    ...Object.keys(invT || {}),
+    ...Object.keys(preciosadmin || {}),
+    ...Object.keys(catalogoProductos || {})
+  ]);
+
+  const list = [];
+  const map = new Map();
+  const aliasMap = new Map();
+
+  for (const codigo of codes) {
+    const p = invP?.[codigo] || {};
+    const a = invA?.[codigo] || {};
+    const t = invT?.[codigo] || {};
+
+    const cat = (catalogoProductos && catalogoProductos[codigo]) ? catalogoProductos[codigo] : null;
+
+    const alias = normalizeAlias(cat?.ALIAS ?? cat?.alias ?? "");
+    const catProducto   = String(cat?.PRODUCTO ?? cat?.producto ?? "").trim();
+    const catDepto      = String(cat?.DEPARTAMENTO ?? cat?.departamento ?? "").trim();
+    const catCategoria  = String(cat?.CATEGORIA ?? cat?.categoria ?? "").trim();
+
+    const data  = preciosadmin?.[codigo] || {};
+    const local = preciosLocal?.[codigo] || {};
+    const merged = { ...data, ...local }; // local sobreescribe GitHub
+
+    const stockP = Number(p.cantidad || 0);
+    const stockA = Number(a.cantidad || 0);
+    const stockT = Number(t.cantidad || 0);
+
+    const obj = {
+      codigo,
+      // 👇 Con inventarios "solo cantidad", estos campos deben venir del catálogo
+      producto: catProducto || "",
+      departamento: catDepto || "",
+      categoria: catCategoria || "",
+      alias: alias || "",
+      stockP,
+      stockA,
+      stockT,
+      stockTotal: stockP + stockA + stockT,
+      precios: {
+        precio: price0(merged.precio),
+        precioA: price0(merged.precioA),
+        precioB: price0(merged.precioB),
+        precioC: price0(merged.precioC),
+        mayoreo: price0(merged.mayoreo),
+        precioVendedor: price0(merged.precioVendedor)
+      },
+      admin: {
+        costo: Number(merged.costo ?? 0),
+        limite: Number(merged.limite ?? 0)
+      }
+    };
+
+    list.push(obj);
+    map.set(codigo, obj);
+    map.set(String(codigo).toLowerCase(), obj);
+    map.set(String(codigo).toUpperCase(), obj);
+
+    if (alias) {
+      aliasMap.set(alias, obj);
+      aliasMap.set(String(alias).toLowerCase(), obj);
+      aliasMap.set(String(alias).toUpperCase(), obj);
+    }
+  }
+
+  list.sort((x,y) => (x.producto||"").localeCompare(y.producto||"", "es"));
+  return { list, map, aliasMap };
+}
+// ================= FIN NUEVO: Utilidades para inventarios =================
+
+
 // ✅ Buscar producto por ALIAS (código de barras)
 function getProdByAlias(alias){
   const key = normalizeAlias(alias);
@@ -1607,7 +1702,26 @@ function resetLogin(){
 function validatePin(){
   if (!selectedRole) return;
 
-  if (pinInput.value === PINS[selectedRole]) {
+  const pin = (pinInput.value || "").trim();
+
+  // ✅ Caso especial: desde el botón "VENDEDOR" se permite entrar también como VENDEDOR JULIO / VENDEDOR LEONARDI
+  if (selectedRole === "VENDEDOR") {
+    let resolvedRole = null;
+    if (pin === PINS.VENDEDOR) resolvedRole = "VENDEDOR";
+    else if (pin === PINS.VENDEDOR_JULIO) resolvedRole = "VENDEDOR_JULIO";
+    else if (pin === PINS.VENDEDOR_LEONARDI) resolvedRole = "VENDEDOR_LEONARDI";
+
+    if (resolvedRole) {
+      localStorage.setItem("role", resolvedRole);
+      startApp();
+      return;
+    }
+
+    pinError.classList.remove("hidden");
+    return;
+  }
+
+  if (pin === PINS[selectedRole]) {
     localStorage.setItem("role", selectedRole);
     startApp();
   } else {
@@ -1778,83 +1892,18 @@ async function ensureCatalogoCargado(forceRefresh = false){
     fetchJson(URLS.invA),
     fetchJson(URLS.invT),
     fetchJson(URLS.preciosadmin),
-    fetchJson(URLS.catalogoProductos).catch(() => ({}))
+    fetchJsonFirstOk([URLS.catalogoProductos, BASE_RAW + "catalogo.json", BASE_RAW + "Catalogo.json"]).catch(() => ({}))
   ]);
 
   // ✅ aplicar cambios locales de ADMIN (si existen)
   const preciosLocal = JSON.parse(localStorage.getItem("preciosModificadosAdmin") || "{}");
 
-  const codes = new Set([
-    ...Object.keys(invP || {}),
-    ...Object.keys(invA || {}),
-    ...Object.keys(invT || {}),
-    ...Object.keys(preciosadmin || {}),
-    ...Object.keys(catalogoProductos || {})
-  ]);
+  const built = buildMasterIndex({ catalogoProductos, invP, invA, invT, preciosadmin, preciosLocal });
 
-  catalogo = [];
-  catalogoMap = new Map();
-  catalogoAliasMap = new Map();
-  inventarioAdmin = [];
-
-  for (const codigo of codes) {
-    const p = invP?.[codigo];
-    const a = invA?.[codigo];
-    const t = invT?.[codigo];
-
-    const base = p || t || a || {};
-    const cat = (catalogoProductos && catalogoProductos[codigo]) ? catalogoProductos[codigo] : null;
-    const alias = normalizeAlias(cat?.ALIAS ?? cat?.alias ?? "");
-    const catProducto = String(cat?.PRODUCTO ?? cat?.producto ?? "").trim();
-    const catDepto = String(cat?.DEPARTAMENTO ?? cat?.departamento ?? "").trim();
-    const catCategoria = String(cat?.CATEGORIA ?? cat?.categoria ?? "").trim();
-    const data = preciosadmin?.[codigo] || {};
-    const local = preciosLocal?.[codigo] || {};
-
-    const merged = { ...data, ...local }; // local sobreescribe GitHub
-
-    const stockP = Number(p?.cantidad || 0);
-    const stockA = Number(a?.cantidad || 0);
-    const stockT = Number(t?.cantidad || 0);
-
-    const obj = {
-      codigo,
-      producto: catProducto || base.producto || "",
-      departamento: catDepto || base.departamento || "",
-      categoria: catCategoria || "",
-      alias: alias || "",
-      stockP,
-      stockA,
-      stockT,
-      stockTotal: stockP + stockA + stockT,
-      precios: {
-        precio: price0(merged.precio),
-        precioA: price0(merged.precioA),
-        precioB: price0(merged.precioB),
-        precioC: price0(merged.precioC),
-        mayoreo: price0(merged.mayoreo),
-        precioVendedor: price0(merged.precioVendedor)
-      },
-      admin: {
-        costo: Number(merged.costo ?? 0),
-        limite: Number(merged.limite ?? 0)
-      }
-    };
-
-    catalogo.push(obj);
-    catalogoMap.set(codigo, obj);
-    // claves extra para evitar problemas por mayúsculas/minúsculas
-    catalogoMap.set(String(codigo).toLowerCase(), obj);
-    catalogoMap.set(String(codigo).toUpperCase(), obj);
-
-    if (alias) {
-      catalogoAliasMap.set(alias, obj);
-      catalogoAliasMap.set(String(alias).toLowerCase(), obj);
-      catalogoAliasMap.set(String(alias).toUpperCase(), obj);
-    }
-
-    inventarioAdmin.push(obj);
-  }
+  catalogo = built.list;
+  catalogoMap = built.map;
+  catalogoAliasMap = built.aliasMap;
+  inventarioAdmin = built.list.slice();
 
   catalogo.sort((x,y) => (x.producto||"").localeCompare(y.producto||"", "es"));
   inventarioAdmin.sort((x,y) => (x.producto||"").localeCompare(y.producto||"", "es"));
@@ -8891,6 +8940,7 @@ let invVendConsulta = [];
 let invVendConsultaCargado = false;
 
 let invVendStockFiltro = localStorage.getItem("invVendStockFiltro") || "TODOS"; // TODOS | CON | SIN
+let invVendBodegaFiltro = localStorage.getItem("invVendBodegaFiltro") || "TODAS"; // TODAS | P | A | T
 let invVendDept = "";    // ej: "FONTANERIA"
 let invVendCat = "";     // ej: "PVC"
 
@@ -8917,48 +8967,61 @@ async function ensureInventarioConsultaVendedorCargado(){
 
   if (invVendConsultaCargado) return;
 
-  const [invP, invA, invT] = await Promise.all([
+  // Inventarios (solo cantidad) + catálogo (metadata)
+  const [invP, invA, invT, catalogoProductos] = await Promise.all([
     fetchJson(URLS.invP),
     fetchJson(URLS.invA),
-    fetchJson(URLS.invT)
+    fetchJson(URLS.invT),
+    fetchJsonFirstOk([URLS.catalogoProductos, BASE_RAW + "catalogo.json", BASE_RAW + "Catalogo.json"]).catch(() => ({}))
   ]);
 
   const codes = new Set([
     ...Object.keys(invP || {}),
     ...Object.keys(invA || {}),
-    ...Object.keys(invT || {})
+    ...Object.keys(invT || {}),
+    ...Object.keys(catalogoProductos || {})
   ]);
 
   invVendConsulta = [];
   invVendDeptCats = new Map();
 
   for (const codigo of codes) {
-    const p = invP?.[codigo];
-    const a = invA?.[codigo];
-    const t = invT?.[codigo];
+    const p = invP?.[codigo] || {};
+    const a = invA?.[codigo] || {};
+    const t = invT?.[codigo] || {};
 
-    const producto = (p?.producto || t?.producto || a?.producto || "");
-    const depRaw = (p?.departamento || t?.departamento || a?.departamento || "");
+    const stockP = Number(p.cantidad || 0);
+    const stockA = Number(a.cantidad || 0);
+    const stockT = Number(t.cantidad || 0);
+    const stockTotal = stockP + stockA + stockT;
 
-    const dc = splitDeptCat(depRaw);
+    const cat = (catalogoProductos && catalogoProductos[codigo]) ? catalogoProductos[codigo] : null;
+    // Si el código no existe en catálogo y además no tiene stock, no lo mostramos (evita entradas “fantasma”)
+    if (!cat && stockTotal === 0) continue;
+
+    const producto = String(cat?.PRODUCTO ?? cat?.producto ?? "").trim() || (stockTotal ? "SIN CATALOGO" : "");
+    const dept = String(cat?.DEPARTAMENTO ?? cat?.departamento ?? "").trim();
+    const catName = String(cat?.CATEGORIA ?? cat?.categoria ?? "").trim();
+
+    const depRaw = dept ? (dept + (catName ? " - " + catName : "")) : "";
 
     const item = {
       codigo,
       producto,
       departamentoRaw: depRaw,
-      dept: dc.dept,
-      cat: dc.cat,
-      stockP: Number(p?.cantidad || 0),
-      stockA: Number(a?.cantidad || 0),
-      stockT: Number(t?.cantidad || 0)
+      dept,
+      cat: catName,
+      stockP,
+      stockA,
+      stockT
     };
 
     invVendConsulta.push(item);
 
-    const d = (dc.dept || "").trim();
+    const d = (dept || "").trim();
     if (d) {
       if (!invVendDeptCats.has(d)) invVendDeptCats.set(d, new Set());
-      const c = (dc.cat || "").trim();
+      const c = (catName || "").trim();
       if (c) invVendDeptCats.get(d).add(c);
     }
   }
@@ -9022,6 +9085,16 @@ function abrirConsultaInventarioVendedor(){
       <button type="button" class="secondary filter-btn" id="invVendF_SIN" onclick="setInvVendStockFiltro('SIN')">Sin stock</button>
     </div>
 
+
+    ${onlyA ? "" : `
+    <div class="filter-row" style="margin-top:8px;">
+      <button type="button" class="secondary filter-btn" id="invVendB_TODAS" onclick="setInvVendBodegaFiltro('TODAS')">Todas</button>
+      <button type="button" class="secondary filter-btn" id="invVendB_P" onclick="setInvVendBodegaFiltro('P')">Principal</button>
+      <button type="button" class="secondary filter-btn" id="invVendB_A" onclick="setInvVendBodegaFiltro('A')">Anexo</button>
+      <button type="button" class="secondary filter-btn" id="invVendB_T" onclick="setInvVendBodegaFiltro('T')">Tienda</button>
+    </div>
+    `}
+
     <button type="button" class="secondary" id="invVendDeptBtn" onclick="abrirModalDeptoVend()">🏷️ Filtrar por departamento (Todos)</button>
 
     <div class="muted" id="invVendFiltrosInfo" style="margin-top:-2px; margin-bottom:10px;"></div>
@@ -9032,6 +9105,7 @@ function abrirConsultaInventarioVendedor(){
   el("invVendSearch")?.addEventListener("input", renderConsultaInventarioVendedor);
 
   updateInvVendFilterButtons();
+  updateInvVendBodegaButtons();
   updateBtnDeptoVend();
   updateInvVendFiltrosInfo();
 
@@ -9077,6 +9151,44 @@ function updateInvVendFilterButtons(){
   });
 }
 
+function setInvVendBodegaFiltro(val){
+  invVendBodegaFiltro = String(val || "TODAS").toUpperCase();
+  if (!["TODAS","P","A","T"].includes(invVendBodegaFiltro)) invVendBodegaFiltro = "TODAS";
+  localStorage.setItem("invVendBodegaFiltro", invVendBodegaFiltro);
+  updateInvVendBodegaButtons();
+  updateInvVendFiltrosInfo();
+  renderConsultaInventarioVendedor();
+}
+
+function updateInvVendBodegaButtons(){
+  ["TODAS","P","A","T"].forEach(k => {
+    const btn = el("invVendB_" + k);
+    if (!btn) return;
+    btn.classList.toggle("active", invVendBodegaFiltro === k);
+  });
+}
+
+function invVendBodegaLabel(){
+  if (invVendBodegaFiltro === "P") return "Principal";
+  if (invVendBodegaFiltro === "A") return "Anexo";
+  if (invVendBodegaFiltro === "T") return "Tienda";
+  return "Total";
+}
+
+function invVendTotalPorFiltro(p, role){
+  const isBode = role === "BODEGUERO";
+  const sp = Number(p.stockP || 0);
+  const sa = Number(p.stockA || 0);
+  const st = Number(p.stockT || 0);
+
+  if (isBode) return sa;
+
+  if (invVendBodegaFiltro === "P") return sp;
+  if (invVendBodegaFiltro === "A") return sa;
+  if (invVendBodegaFiltro === "T") return st;
+  return sp + sa + st;
+}
+
 function updateBtnDeptoVend(){
   const btn = el("invVendDeptBtn");
   if (!btn) return;
@@ -9098,8 +9210,17 @@ function updateInvVendFiltrosInfo(){
   const info = el("invVendFiltrosInfo");
   if (!info) return;
 
+  const role = localStorage.getItem("role") || "";
+  const isBode = role === "BODEGUERO";
+
   const parts = [];
   parts.push(`Stock: <b>${invVendStockFiltro === "TODOS" ? "Todos" : (invVendStockFiltro === "CON" ? "Con stock" : "Sin stock")}</b>`);
+
+  if (!isBode) {
+    parts.push(`Bodega: <b>${escapeHtml(invVendBodegaLabel())}</b>`);
+  } else {
+    parts.push("Bodega: <b>Anexo</b>");
+  }
 
   if (invVendDept) {
     if (invVendCat) parts.push(`Depto: <b>${escapeHtml(invVendDept)} - ${escapeHtml(invVendCat)}</b>`);
@@ -9132,9 +9253,7 @@ function renderConsultaInventarioVendedor(){
       }
 
       // filtro stock (total)
-      const total = isBode
-        ? Number(p.stockA || 0)
-        : (Number(p.stockP || 0) + Number(p.stockA || 0) + Number(p.stockT || 0));
+      const total = invVendTotalPorFiltro(p, role);
 
       if (invVendStockFiltro === "CON") return total > 0;
       if (invVendStockFiltro === "SIN") return total <= 0;
@@ -9155,9 +9274,7 @@ function renderConsultaInventarioVendedor(){
   }
 
   cont.innerHTML = filtrados.map(p => {
-    const total = isBode
-      ? Number(p.stockA || 0)
-      : (Number(p.stockP || 0) + Number(p.stockA || 0) + Number(p.stockT || 0));
+    const total = invVendTotalPorFiltro(p, role);
 
     const depTxt = (p.dept || "").trim()
       ? `${escapeHtml(p.dept)}${(p.cat || "").trim() ? " - " + escapeHtml(p.cat) : ""}`
@@ -9176,7 +9293,7 @@ function renderConsultaInventarioVendedor(){
       cls = "ticket clickable";
     }
 
-    const totalLabel = isBode ? "Anexo" : "Total";
+    const totalLabel = isBode ? "Anexo" : invVendBodegaLabel();
 
     const stocksHtml = isBode
       ? `<span class="pill pill-a">Anexo: ${Number(p.stockA || 0)}</span>`
@@ -12016,4 +12133,3 @@ async function crearExcelRecepcionIngreso(d){
   const safeDate = String(d.fechaISO || "").replace(/[^\d\-]/g, "");
   setLastFile(blob, `ingreso-${safeDate || "recepcion"}-${d.id}.xlsx`, "Ingreso Recepción (Excel)", `Ingreso ${d.fechaISO || ""}`, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 }
-
