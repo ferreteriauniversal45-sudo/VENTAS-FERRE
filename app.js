@@ -1473,6 +1473,30 @@ function isVendedorRole(role = getRole()){
   return role === "VENDEDOR" || role === "VENDEDOR_JULIO" || role === "VENDEDOR_LEONARDI";
 }
 
+const MAINTENANCE_MESSAGE = "EL SERVIDOR DE LA APP UNIVENTAS ACTUALMENTE SE ENCUENTRA DESHABILITADO POR MANTENIMIENTO Y ACTUALIZACIONES DE PRECIOS, PROXIMAMENTE SERA HABILITADA NUEVAMENTE GRACIAS";
+
+function isMaintenanceRole(role = getRole()){
+  return isVendedorRole(role) || role === "RECEPCION" || role === "VISUALIZADOR" || role === "ADMIN";
+}
+
+function renderMaintenanceScreen(){
+  headerTitle.textContent = "Mantenimiento";
+  vendedorHome.classList.add("hidden");
+  operadorHome.classList.add("hidden");
+  if (operadorHomeUI) operadorHomeUI.classList.add("hidden");
+  if (bodegueroHomeUI) bodegueroHomeUI.classList.add("hidden");
+  contenido.classList.remove("hidden");
+  contenido.innerHTML = `
+    <div class="card" style="max-width:720px; margin:24px auto; text-align:center;">
+      <div style="font-size:46px; line-height:1; margin-bottom:12px;">⚠️</div>
+      <strong style="display:block; font-size:20px; margin-bottom:10px;">Servidor temporalmente deshabilitado</strong>
+      <div style="color:#374151; font-size:16px; line-height:1.6; white-space:normal;">
+        ${MAINTENANCE_MESSAGE}
+      </div>
+    </div>
+  `;
+}
+
 function getAllowedPriceTypes(role = getRole()){
   
   let types = [...PRICE_TYPES];
@@ -1996,6 +2020,12 @@ function startApp(){
 
   const role = localStorage.getItem("role");
 
+  if (isMaintenanceRole(role)) {
+    renderMaintenanceScreen();
+    try { enablePhoneBackBehavior(); } catch {}
+    return;
+  }
+
   if (btnExclusivos) {
     const allow = isVendedorRole(role) || role === "ADMIN";
     btnExclusivos.style.display = allow ? "inline-flex" : "none";
@@ -2011,6 +2041,11 @@ function startApp(){
 
   if (operadorHomeUI) operadorHomeUI.classList.add("hidden");
   if (bodegueroHomeUI) bodegueroHomeUI.classList.add("hidden");
+
+  if (isMaintenanceRole(role)) {
+    renderMaintenanceScreen();
+    return;
+  }
 
   if (isVendedorRole(role)) {
     headerTitle.textContent = "Cotizaciones";
