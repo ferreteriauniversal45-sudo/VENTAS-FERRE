@@ -1,4 +1,4 @@
-
+/* ================= CONFIG ================= */
 const BASE_RAW = "https://raw.githubusercontent.com/ferreteriauniversal45-sudo/ferreteria-inventario-app/main/";
 const URLS = {
   logo: BASE_RAW + "logo.png",
@@ -10,8 +10,6 @@ const URLS = {
   motoristas: BASE_RAW + "motoristas.json",
   placas: BASE_RAW + "placas.json",
   version: BASE_RAW + "inventario_version.json"
-,
-  exclusivos: BASE_RAW + "exclusivos.json"
 };
 
 const PINS = {
@@ -29,12 +27,12 @@ const EMPRESA_RTN = "0301-1964-008634";
 
 
 
-
-let recepcionCatalogoLocal = null;     
-let recepcionIngresos = null;          
-let recepcionDraftIngreso = null;      
-let recepcionIngresoDoc = null;        
-let recepcionEditId = null;            
+/* ================= RECEPCION: STATE ================= */
+let recepcionCatalogoLocal = null;     // { [alias]: { alias, producto, codigo, createdAtISO } }
+let recepcionIngresos = null;          // array de ingresos guardados
+let recepcionDraftIngreso = null;      // borrador actual
+let recepcionIngresoDoc = null;        // ingreso en edición / captura
+let recepcionEditId = null;            // id del ingreso editado (si aplica)
 let recepcionLoaded = false;
 
 const PRICE_TYPES = ["precio","precioA","precioB","precioC","mayoreo","precioVendedor"];
@@ -56,7 +54,14 @@ const PRICE_CODE_LETTER = {
   precioVendedor: "V"
 };
 
+/* ================= COTIZACIONES: CÓDIGOS VINCULADOS =================
+   Reglas solicitadas:
+   - 09-0039 ↔ 02-0203
+   - 02-0036 ↔ 02-0348
 
+   Si agregas/modificas la cantidad de uno, el otro se agrega/ajusta
+   automáticamente para quedar con la misma cantidad.
+*/
 const LINKED_CODE_MAP = {
   "09-0039": "02-0203",
   "02-0036": "02-0348",
@@ -79,22 +84,21 @@ function findFirstItemByCodigo(code){
   return cotizacionActual?.items?.find(it => normCode(it.codigo) === c) || null;
 }
 
-function findMatchingItem(codigo, priceType, customPrice, isExclusive){
+function findMatchingItem(codigo, priceType, customPrice){
   const c = normCode(codigo);
   const p = String(priceType || "precio");
   const cp = Number(customPrice || 0);
   return cotizacionActual?.items?.find(it =>
     normCode(it.codigo) === c &&
     String(it.priceType || "precio") === p &&
-    Number(it.customPrice || 0) === cp &&
-    !!it.isExclusive === !!isExclusive
+    Number(it.customPrice || 0) === cp
   ) || null;
 }
 
-function upsertItemSetQty(codigo, qty, priceType, customPrice, isExclusive){
+function upsertItemSetQty(codigo, qty, priceType, customPrice){
   const q = Math.max(1, Number(qty || 1));
 
-  let it = findMatchingItem(codigo, priceType, customPrice, isExclusive);
+  let it = findMatchingItem(codigo, priceType, customPrice);
   if (it) {
     it.qty = q;
     return it;
@@ -105,8 +109,7 @@ function upsertItemSetQty(codigo, qty, priceType, customPrice, isExclusive){
     codigo: normCode(codigo),
     qty: q,
     priceType: String(priceType || "precio"),
-    customPrice: Number(customPrice || 0),
-    isExclusive: !!isExclusive
+    customPrice: Number(customPrice || 0)
   };
 
   cotizacionActual.items.push(it);
@@ -115,7 +118,6 @@ function upsertItemSetQty(codigo, qty, priceType, customPrice, isExclusive){
 
 function syncLinkedPairForItem(it){
   if (!it || __linkedSyncLock) return;
-  if (it.isExclusive) return;
 
   const pair = getLinkedCode(it.codigo);
   if (!pair) return;
@@ -124,24 +126,24 @@ function syncLinkedPairForItem(it){
   try {
     const refQty = Math.max(1, Number(it.qty || 1));
 
-    
+    // Preferimos sincronizar con la misma configuración de precio si existe.
     const refType = String(it.priceType || "precio");
     const refCP = Number(it.customPrice || 0);
 
-    let target = findMatchingItem(pair, refType, refCP, false);
+    let target = findMatchingItem(pair, refType, refCP);
     if (!target) target = findFirstItemByCodigo(pair);
 
     if (target) {
       target.qty = refQty;
     } else {
-      upsertItemSetQty(pair, refQty, refType, refCP, false);
+      upsertItemSetQty(pair, refQty, refType, refCP);
     }
   } finally {
     __linkedSyncLock = false;
   }
 }
 
-
+/* ================= HELPERS ================= */
 const el = (id) => document.getElementById(id);
 
 function moneyL(value){
@@ -149,7 +151,7 @@ function moneyL(value){
   return "L. " + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-
+// Normaliza valores numéricos (evita NaN y precios negativos)
 function num0(value){
   const n = Number(value);
   return (typeof n === "number" && isFinite(n)) ? n : 0;
@@ -171,7 +173,7 @@ function escapeHtml(s){
 }
 
 function escSq(s){
-  
+  // Escapa para usar dentro de comillas simples en onclick="fn('...')"
   return String(s ?? "")
     .replaceAll("\\", "\\\\")
     .replaceAll("'", "\\'");
@@ -191,7 +193,7 @@ function openModal(id){
   const m = el(id);
   if (!m) return;
 
-  
+  // Elevar z-index para que este modal quede arriba del que ya esté abierto
   try {
     const open = Array.from(document.querySelectorAll('.modal.show'));
     let top = 0;
@@ -204,7 +206,7 @@ function openModal(id){
     const target = Math.max(base, top + 10);
     m.style.zIndex = String(target);
   } catch {
-    
+    // si algo falla, igual abrimos el modal
   }
 
   m.classList.add('show');
@@ -219,232 +221,7 @@ function closeModal(id){
 
 
 
-let __exclusivosData = null;
-
-function cerrarModalExclusivos(){
-  closeModal("modalExclusivos");
-}
-
-function cerrarModalExclusivoDetalle(){
-  closeModal("modalExclusivoDetalle");
-}
-
-let __exclusivosMode = "browse"; 
-let __exclusivoCodigoActual = "";
-
-async function abrirModalExclusivos(mode = "browse"){
-  const role = getRole();
-  if (!(isVendedorRole(role) || role === "ADMIN")) return;
-
-  __exclusivosMode = (mode === "select") ? "select" : "browse";
-  __exclusivoCodigoActual = "";
-
-  openModal("modalExclusivos");
-
-  if (exclusivosBuscar) {
-    if (__exclusivosMode === "browse") exclusivosBuscar.value = exclusivosBuscar.value || "";
-    setTimeout(() => { try { exclusivosBuscar.focus(); } catch {} }, 50);
-  }
-
-  await renderExclusivos();
-}
-
-
-function abrirExclusivosHome(){
-  const role = getRole();
-  if (!(isVendedorRole(role) || role === "ADMIN")) return;
-
-  headerTitle.textContent = (role === "ADMIN") ? "Exclusivos Admin" : "Productos Exclusivos";
-
-  __exclusivosMode = "browse";
-  __exclusivoCodigoActual = "";
-
-  vendedorHome.classList.add("hidden");
-  operadorHome.classList.add("hidden");
-  contenido.classList.remove("hidden");
-
-  const isAdmin = (role === "ADMIN");
-
-  contenido.innerHTML = `
-    <button type="button" class="secondary" onclick="volverHome()">⬅ Volver</button>
-
-    <div class="card">
-      <strong>⭐ Productos Exclusivos</strong>
-      <div class="muted">${isAdmin ? "Toca un producto para ver precios y datos de admin." : "Toca un producto para ver precios."}</div>
-    </div>
-
-    <input id="excHomeSearch" placeholder="🔍 Buscar por código o nombre" />
-
-    <div id="excHomeList"></div>
-  `;
-
-  el("excHomeSearch")?.addEventListener("input", renderExclusivosHomeList);
-
-  el("excHomeList").innerHTML = `<div class="card"><strong>⏳ Cargando exclusivos...</strong></div>`;
-
-  loadExclusivos(false).then(() => {
-    try { renderExclusivosHomeList(); } catch {}
-  });
-}
-
-function renderExclusivosHomeList(){
-  const cont = el("excHomeList");
-  if (!cont) return;
-
-  const data = __exclusivosData || {};
-  const q = (el("excHomeSearch")?.value || "").toLowerCase().trim();
-
-  const entries = Object.entries(data || {});
-  const filtered = q
-    ? entries.filter(([k, v]) => {
-        const p = (v && v.producto) ? String(v.producto) : "";
-        return String(k).toLowerCase().includes(q) || p.toLowerCase().includes(q);
-      })
-    : entries;
-
-  filtered.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
-
-  const rows = filtered.slice(0, 250).map(([k, v]) => {
-    const codigo = String(k);
-    const prod = (v && v.producto) ? String(v.producto) : "";
-    return `
-      <div class="list-item" role="button" tabindex="0"
-           onclick="abrirModalExclusivoDetalle(\'${escSq(codigo)}\')"
-           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();abrirModalExclusivoDetalle(\'${escSq(codigo)}\')}">
-        <div class="list-title">${escapeHtml(codigo)}</div>
-        <div class="list-sub">${escapeHtml(prod)}</div>
-      </div>
-    `;
-  }).join("");
-
-  cont.innerHTML = `
-    <div class="muted" style="margin:4px 0 10px 0;">${filtered.length} producto(s) ${filtered.length > 250 ? "• mostrando 250" : ""}</div>
-    <div class="list">${rows || `<div class="muted">Sin resultados</div>`}</div>
-  `;
-}
-
-
-function __fmtNum(v){
-  const n = Number(v || 0);
-  if (!Number.isFinite(n)) return "";
-  return n.toLocaleString("es-HN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-async function loadExclusivos(force = false){
-  if (__exclusivosData && !force) return __exclusivosData;
-  const data = await fetchJson(URLS.exclusivos, { allowCache: true });
-  __exclusivosData = (data && typeof data === "object") ? data : {};
-  return __exclusivosData;
-}
-
-async function renderExclusivos(){
-  const data = await loadExclusivos(false);
-  const q = String(exclusivosBuscar ? exclusivosBuscar.value : "").trim().toLowerCase();
-
-  const entries = Object.entries(data || {});
-  const filtered = q
-    ? entries.filter(([k, v]) => {
-        const p = (v && v.producto) ? String(v.producto) : "";
-        return String(k).toLowerCase().includes(q) || p.toLowerCase().includes(q);
-      })
-    : entries;
-
-  filtered.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
-
-  const hint = (__exclusivosMode === "select" && !!cotizacionActual)
-    ? `<div class="muted" style="margin:4px 0 10px 0;">${filtered.length} producto(s) • toca un producto para ver precios y agregar</div>`
-    : `<div class="muted" style="margin:4px 0 10px 0;">${filtered.length} producto(s)</div>`;
-
-
-  const clickFn = (__exclusivosMode === "select" && !!cotizacionActual)
-    ? "abrirModalAgregarProductoExclusivo"
-    : "abrirModalExclusivoDetalle";
-  const items = filtered.map(([k, v]) => {
-    const codigo = String(k);
-    const prod = (v && v.producto) ? String(v.producto) : "";
-    return `
-      <div class="list-item" role="button" tabindex="0"
-           onclick="${clickFn}(\'${escSq(codigo)}\')"
-           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${clickFn}(\'${escSq(codigo)}\')}">
-        <div class="list-title">${escapeHtml(codigo)}</div>
-        <div class="list-sub">${escapeHtml(prod)}</div>
-      </div>
-    `;
-  }).join("");
-
-  if (exclusivosBody) {
-    exclusivosBody.innerHTML = `
-      ${hint}
-      <div class="list">${items || `<div class="muted">Sin resultados</div>`}</div>
-    `;
-  }
-}
-
-async function abrirModalExclusivoDetalle(codigo){
-  const role = getRole();
-  if (!(isVendedorRole(role) || role === "ADMIN")) return;
-
-  const data = await loadExclusivos(false);
-  const prod = data ? data[codigo] : null;
-  if (!prod) {
-    alert("No se encontró el producto.");
-    return;
-  }
-
-  __exclusivoCodigoActual = String(codigo);
-
-  const isAdmin = (role === "ADMIN");
-  el("exdTitulo").textContent = prod.producto || "Producto";
-  el("exdSub").textContent = `Código: ${codigo} • ⭐ EXCLUSIVO`;
-
-  const precios = [
-    ["Precio", prod.precio],
-    ["Precio A", prod.precioA],
-    ["Precio B", prod.precioB],
-    ["Precio C", prod.precioC],
-    ["Mayoreo", prod.mayoreo]
-  ];
-
-  el("exdPrecios").innerHTML = precios.map(([k, v]) => {
-    const val = (v === undefined || v === null) ? "N/D" : __fmtNum(v);
-    return `<div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(val)}</div>`;
-  }).join("");
-
-  const adminWrap = el("exdAdminWrap");
-  const limiteWrap = el("exdLimiteWrap");
-  if (isAdmin) {
-    adminWrap.classList.remove("hidden");
-    limiteWrap.classList.remove("hidden");
-
-    el("exdAdmin").innerHTML = `
-      <div class="k">Costo</div><div class="v">${escapeHtml(__fmtNum(prod.costo))}</div>
-      <div class="k">Costo Sin Impt</div><div class="v">${escapeHtml(__fmtNum(prod.costoSinImpt))}</div>
-    `;
-    const lim = Number(prod.limite || 0);
-    el("exdLimite").innerHTML = `
-      <div class="k">Límite</div><div class="v">${escapeHtml(lim > 0 ? __fmtNum(lim) : "No definido")}</div>
-    `;
-  } else {
-    adminWrap.classList.add("hidden");
-    limiteWrap.classList.add("hidden");
-  }
-
-  const canAdd = (__exclusivosMode === "select") && !!cotizacionActual && (isVendedorRole(role) || role === "ADMIN");
-  const btn = el("exdAddBtn");
-  if (btn) {
-    if (canAdd) {
-      btn.style.display = "";
-      btn.onclick = () => { try { abrirModalAgregarProductoExclusivo(__exclusivoCodigoActual); } catch {} };
-    } else {
-      btn.style.display = "none";
-      btn.onclick = null;
-    }
-  }
-
-  openModal("modalExclusivoDetalle");
-}
-
-
+/* ================= PHONE BACK (botón Atrás del teléfono) ================= */
 let __phoneBackEnabled = false;
 let __allowNativeBackOnce = false;
 let __lastHomeBack = 0;
@@ -488,7 +265,7 @@ function clickVisibleBackButton(){
   const buttons = Array.from(document.querySelectorAll('button'));
   for (const b of buttons) {
     if (!b || b.disabled) continue;
-    if (b.offsetParent === null) continue; 
+    if (b.offsetParent === null) continue; // no visible
     const txt = (b.textContent || '').trim().toLowerCase();
     if (!txt) continue;
 
@@ -505,13 +282,13 @@ function clickVisibleBackButton(){
 }
 
 function handlePhoneBackAction(){
-  
+  // 1) Si hay un modal abierto, cerrarlo primero
   if (closeTopmostModal()) return true;
 
-  
+  // 2) Si hay un botón "Volver" visible, usarlo
   if (clickVisibleBackButton()) return true;
 
-  
+  // 3) Si estamos en pantalla secundaria sin botón volver, regresar a HOME
   try {
     if (typeof contenido !== 'undefined' && contenido && !contenido.classList.contains('hidden')) {
       if (typeof volverHome === 'function') {
@@ -521,13 +298,13 @@ function handlePhoneBackAction(){
     }
   } catch {}
 
-  return false; 
+  return false; // ya estamos en “root”
 }
 
 function onPhoneBackPopstate(){
   if (!__phoneBackEnabled) return;
 
-  
+  // cuando permitimos salida nativa (doble atrás)
   if (__allowNativeBackOnce) {
     __allowNativeBackOnce = false;
     return;
@@ -540,12 +317,12 @@ function onPhoneBackPopstate(){
     return;
   }
 
-  
-  
+  // Ya está en inicio/root: NUNCA salir de la app desde el botón Atrás del teléfono.
+  // Solo “trampeamos” el historial y (opcional) avisamos sin spamear.
   const now = Date.now();
   if (now - __lastHomeBack > 1800) {
     __lastHomeBack = now;
-    
+    // En HOME no hacemos nada (no salimos de la app).
   }
   try { history.pushState({ __appTrap: true, t: Date.now() }, '', location.href); } catch {}
 }
@@ -555,15 +332,15 @@ function enablePhoneBackBehavior(){
   __phoneBackEnabled = true;
 
   try {
-    
+    // Estado base + estado trampa. Así el botón Atrás no te saca de la app.
     history.replaceState({ __appBase: true }, '', location.href);
     history.pushState({ __appTrap: true, t: Date.now() }, '', location.href);
   } catch {}
 
   window.addEventListener('popstate', onPhoneBackPopstate);
 }
-
-const THEME_KEY = "theme"; 
+/* ================= THEME (claro/oscuro) ================= */
+const THEME_KEY = "theme"; // "light" | "dark"
 
 function getSystemTheme(){
   try {
@@ -595,7 +372,7 @@ function initTheme(){
     applyTheme(getSystemTheme(), false);
   }
 
-  
+  // si el usuario no eligió manualmente, seguir el sistema
   if (!saved) {
     try {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -668,7 +445,7 @@ function openSettings(){
 
 initTheme();
 
-
+/* ================= CALCULATOR (modales) ================= */
 let __calcTargetInputId = null;
 let __calcExpr = "";
 let __calcLast = null;
@@ -677,7 +454,7 @@ function openCalcForInput(inputId){
   __calcTargetInputId = String(inputId || "");
   __calcLast = null;
 
-  
+  // Prefill: si el input tiene un número, úsalo como inicio.
   try {
     const v = String(el(__calcTargetInputId)?.value ?? "").trim();
     __calcExpr = v ? v : "";
@@ -690,7 +467,7 @@ function openCalcForInput(inputId){
 }
 
 function calcSanitize(expr){
-  
+  // Permitimos solo números, operadores básicos y paréntesis.
   return String(expr || "")
     .replace(/×/g, "*")
     .replace(/÷/g, "/")
@@ -702,7 +479,7 @@ function calcTryEval(expr){
   const safe = calcSanitize(expr);
   if (!safe) return null;
   try {
-    
+    // eslint-disable-next-line no-new-func
     const out = Function("'use strict'; return (" + safe + ")")();
     if (typeof out !== "number" || !Number.isFinite(out)) return null;
     return out;
@@ -753,7 +530,7 @@ function calcEquals(){
     return;
   }
   __calcLast = r;
-  
+  // Reemplaza la expresión por el resultado para seguir calculando.
   __calcExpr = String(r);
   calcRender();
 }
@@ -766,21 +543,21 @@ function calcFormatForTarget(inputEl, num){
   const minAttr = inputEl.getAttribute("min");
   const min = (minAttr === null || minAttr === undefined || minAttr === "") ? null : Number(minAttr);
 
-  
+  // Precio: 2 decimales
   if (/precio/i.test(id) || step === "0.01") {
     let v = num;
     if (min !== null && Number.isFinite(min)) v = Math.max(min, v);
     return v.toFixed(2);
   }
 
-  
+  // Cantidad: entero (redondeo)
   if (/qty|cantidad/i.test(id)) {
     let v = Math.round(num);
     if (min !== null && Number.isFinite(min)) v = Math.max(min, v);
     return String(v);
   }
 
-  
+  // Default
   let v = num;
   if (min !== null && Number.isFinite(min)) v = Math.max(min, v);
   return String(v);
@@ -806,7 +583,7 @@ function calcUse(){
   setTimeout(() => { try { target.focus(); } catch {} }, 50);
 }
 
-
+/* ================= BACKUP (export/import) ================= */
 const BACKUP_PREFIX_DRAFT = "opDraft_";
 const BACKUP_KEYS = [
   "nombreVendedor",
@@ -917,11 +694,11 @@ async function importBackupFromFile(file){
   if (!ok) return;
 
   try {
-    
+    // limpiar solo claves conocidas
     const allow = new Set(BACKUP_KEYS);
     allow.forEach(k => { try { localStorage.removeItem(k); } catch {} });
 
-    
+    // borrar drafts existentes
     const toRemove = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
@@ -929,7 +706,7 @@ async function importBackupFromFile(file){
     }
     toRemove.forEach(k => { try { localStorage.removeItem(k); } catch {} });
 
-    
+    // restaurar desde respaldo
     for (const k of Object.keys(storage)) {
       if (allow.has(k) || k.startsWith(BACKUP_PREFIX_DRAFT)) {
         localStorage.setItem(k, String(storage[k] ?? ""));
@@ -954,10 +731,10 @@ async function clearLocalData(){
 
   try {
     for (const k of BACKUP_KEYS) {
-      if (k === THEME_KEY) continue; 
+      if (k === THEME_KEY) continue; // conservar tema
       localStorage.removeItem(k);
     }
-    
+    // borrar drafts
     const toRemove = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
@@ -974,7 +751,7 @@ async function clearLocalData(){
 
 
 
-
+/* ================= UI MODALS (alert/confirm bonitos) ================= */
 let __uiAlertResolver = null;
 let __uiConfirmResolver = null;
 
@@ -990,7 +767,7 @@ function uiAlert(message, opts = {}){
   const title = opts.title || "Mensaje";
   const icon = opts.icon || uiGuessIcon(message, "ℹ️");
 
-  
+  // fallback si no existen elementos
   if (!el("modalUiAlert") || !el("uiAlertText")) {
     try { window.__nativeAlert ? window.__nativeAlert(message) : console.log(message); } catch {}
     return Promise.resolve();
@@ -1023,7 +800,7 @@ function uiConfirm(message, opts = {}){
   const cancelText = opts.cancelText || "Cancelar";
 
   if (!el("modalUiConfirm") || !el("uiConfirmText")) {
-    
+    // fallback
     const res = window.__nativeConfirm ? window.__nativeConfirm(message) : true;
     return Promise.resolve(!!res);
   }
@@ -1033,7 +810,7 @@ function uiConfirm(message, opts = {}){
   el("uiConfirmText").textContent = String(message ?? "");
   el("uiConfirmOkBtn").textContent = okText;
 
-  
+  // set cancel text
   const cancelBtn = el("modalUiConfirm").querySelector("button.secondary");
   if (cancelBtn) cancelBtn.textContent = cancelText;
 
@@ -1064,11 +841,11 @@ function uiConfirmCancel(){
 
 }
 
-
+/* ================= MODAL: DESPACHAR SALIDA (pendientes de salida) ================= */
 let __dsResolver = null;
 
 function dsAbrir({ motoristas = [], placas = [], defaultId = "", defaultNombre = "", defaultPlaca = "" } = {}){
-  
+  // cachea listas si vienen precargadas
   if (Array.isArray(motoristas) && motoristas.length) __motoristasRepoCache = motoristas;
   if (Array.isArray(placas) && placas.length) __placasRepoCache = placas;
 
@@ -1123,7 +900,7 @@ function dsCerrar(ok){
 }
 
 
-
+/* ================= PICKERS: Motoristas / Placas (desde GitHub) ================= */
 let __motoristasRepoCache = null;
 let __placasRepoCache = null;
 
@@ -1133,7 +910,7 @@ let __pickMotoristaResolver = null;
 let __pickPlacaResolver = null;
 
 function __normalizeStringList(data){
-  
+  // Acepta: ["A","B"] o {items:[...]} o {"A":true,...} o texto (líneas)
   if (Array.isArray(data)) return data;
   if (typeof data === "string") {
     return data.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
@@ -1142,7 +919,7 @@ function __normalizeStringList(data){
     if (Array.isArray(data.items)) return data.items;
     if (Array.isArray(data.motoristas)) return data.motoristas;
     if (Array.isArray(data.placas)) return data.placas;
-    
+    // si es mapa, usamos llaves
     return Object.keys(data || {});
   }
   return [];
@@ -1150,7 +927,7 @@ function __normalizeStringList(data){
 
 function __normalizeMotoristas(data){
   const arr = __normalizeStringList(data);
-  
+  // si ya vienen objetos {id,nombre}
   if (arr.length && typeof arr[0] === "object" && arr[0] !== null) {
     return arr
       .map(x => ({
@@ -1168,7 +945,7 @@ function __normalizeMotoristas(data){
 function __normalizePlacas(data){
   const arr = __normalizeStringList(data);
   if (arr.length && typeof arr[0] === "object" && arr[0] !== null) {
-    
+    // por si vienen como {placa:"HAA1234"} o {id:"HAA1234"}
     return arr
       .map(x => String(x.placa ?? x.id ?? x.value ?? "").trim().toUpperCase())
       .filter(Boolean);
@@ -1183,7 +960,7 @@ async function loadMotoristasRepo(force=false){
     __motoristasRepoCache = __normalizeMotoristas(data);
   }catch(e){
     console.warn("No se pudo cargar motoristas del repo:", e);
-    
+    // fallback: lo que exista en localStorage (legacy)
     try{
       __motoristasRepoCache = (getMotoristasOp() || []).map(m => ({ id: String(m.id ?? m.nombre ?? ""), nombre: String(m.nombre ?? "") })).filter(m => m.nombre);
     }catch(_){
@@ -1305,7 +1082,7 @@ function pickPlacaCerrar(){
   }
 }
 
-
+/* ===== Hooks para Operador / Despacho ===== */
 async function opSeleccionarMotorista(){
   if (!salidaFactura) return;
   const m = await pickMotoristaAbrir();
@@ -1318,7 +1095,7 @@ async function opSeleccionarMotorista(){
 
   actualizarPreviewSalida();
 
-  
+  // Después de elegir motorista, abrir selección de placa
   await opSeleccionarPlaca();
 }
 
@@ -1349,7 +1126,7 @@ async function dsSeleccionarMotorista(){
   if (el("dsMotoristaNombre")) el("dsMotoristaNombre").value = m.nombre || "";
   if (el("dsMotoristaNombreDisplay")) el("dsMotoristaNombreDisplay").value = m.nombre || "";
 
-  
+  // Después de elegir motorista, abrir selección de placa
   await dsSeleccionarPlaca();
 }
 
@@ -1366,7 +1143,7 @@ function dsLimpiarMotorista(){
   if (el("dsMotoristaNombreDisplay")) el("dsMotoristaNombreDisplay").value = "";
 }
 
-
+// Reemplazar alert nativo (evita "https://... dice")
 (function(){
   if (!window.__nativeAlert) window.__nativeAlert = window.alert.bind(window);
   if (!window.__nativeConfirm) window.__nativeConfirm = window.confirm.bind(window);
@@ -1388,7 +1165,7 @@ function getRole(){
 }
 
 
-
+/* ================= MOVIMIENTOS: Usuario (Excel) + Bodega ================= */
 const MOV_USER_KEY = "movimientosUsuario";
 let __movUserResolver = null;
 
@@ -1400,7 +1177,7 @@ function pedirMovimientosUsuario(){
   const existing = getMovimientosUsuario();
   if (existing) return Promise.resolve(existing);
 
-  
+  // Si no existe el modal (por cualquier razón), fallback a prompt nativo.
   if (!el("modalMovUsuario") || !el("movUsuarioInput")) {
     const v = (window.prompt("Nombre de usuario para exportar movimientos (se guarda en este teléfono):", "") || "").trim();
     if (v) localStorage.setItem(MOV_USER_KEY, v);
@@ -1473,42 +1250,18 @@ function isVendedorRole(role = getRole()){
   return role === "VENDEDOR" || role === "VENDEDOR_JULIO" || role === "VENDEDOR_LEONARDI";
 }
 
-const MAINTENANCE_MESSAGE = "EL SERVIDOR DE LA APP UNIVENTAS ACTUALMENTE SE ENCUENTRA DESHABILITADO POR MANTENIMIENTO Y ACTUALIZACIONES DE PRECIOS, PROXIMAMENTE SERA HABILITADA NUEVAMENTE GRACIAS";
-
-function isMaintenanceRole(role = getRole()){
-  return isVendedorRole(role) || role === "RECEPCION" || role === "VISUALIZADOR" || role === "ADMIN";
-}
-
-function renderMaintenanceScreen(){
-  headerTitle.textContent = "Mantenimiento";
-  vendedorHome.classList.add("hidden");
-  operadorHome.classList.add("hidden");
-  if (operadorHomeUI) operadorHomeUI.classList.add("hidden");
-  if (bodegueroHomeUI) bodegueroHomeUI.classList.add("hidden");
-  contenido.classList.remove("hidden");
-  contenido.innerHTML = `
-    <div class="card" style="max-width:720px; margin:24px auto; text-align:center;">
-      <div style="font-size:46px; line-height:1; margin-bottom:12px;">⚠️</div>
-      <strong style="display:block; font-size:20px; margin-bottom:10px;">Servidor temporalmente deshabilitado</strong>
-      <div style="color:#374151; font-size:16px; line-height:1.6; white-space:normal;">
-        ${MAINTENANCE_MESSAGE}
-      </div>
-    </div>
-  `;
-}
-
 function getAllowedPriceTypes(role = getRole()){
-  
+  // Por defecto: todo
   let types = [...PRICE_TYPES];
 
-  
+  // Restricciones por rol
   if (role === "VENDEDOR_JULIO") {
-    
+    // Julio: no puede usar PRECIO VENDEDOR
     types = types.filter(t => t !== "precioVendedor");
   }
 
   if (role === "VENDEDOR_LEONARDI") {
-    
+    // Leonardi: no puede usar PRECIO VENDEDOR ni MAYOREO
     types = types.filter(t => t !== "precioVendedor" && t !== "mayoreo");
   }
 
@@ -1519,7 +1272,7 @@ function sanitizeCotizacionPriceTypesForRole(){
   if (!cotizacionActual || !Array.isArray(cotizacionActual.items)) return;
 
   const role = getRole();
-  if (!isVendedorRole(role) && role !== "ADMIN") return; 
+  if (!isVendedorRole(role) && role !== "ADMIN") return; // solo aplica a cotizaciones
 
   const allowed = getAllowedPriceTypes(role);
   if (!allowed.length) return;
@@ -1544,7 +1297,7 @@ function sanitizeCotizacionPriceTypesForRole(){
   }
 }
 
-
+// ✅ Buscar producto por código (case-insensitive)
 function getProdByCodigo(codigo){
   const key = String(codigo || "").trim();
   if (!key) return null;
@@ -1557,114 +1310,12 @@ function getProdByCodigo(codigo){
   );
 }
 
-function getExclusiveProdByCodigo(codigo){
-  const key = String(codigo || "").trim();
-  if (!key) return null;
-  const data = __exclusivosData;
-  if (!data) return null;
-  return data[key] || data[key.toLowerCase()] || data[key.toUpperCase()] || null;
-}
-
-function getProdForItem(it){
-  if (!it) return null;
-  if (it.isExclusive) return getExclusiveProdByCodigo(it.codigo) || getProdByCodigo(it.codigo);
-  return getProdByCodigo(it.codigo);
-}
-
-
+// ✅ Normalizar código de barras (ALIAS)
 function normalizeAlias(v){
   return String(v || "").trim().replace(/\s+/g, "");
 }
 
-
-async function fetchJsonFirstOk(urls, opts = {}) {
-  const list = Array.isArray(urls) ? urls : [urls];
-  let lastErr = null;
-  for (const u of list) {
-    try { return await fetchJson(u, opts); }
-    catch (e) { lastErr = e; }
-  }
-  throw lastErr || new Error("No se pudo cargar JSON (todas las URLs fallaron)");
-}
-
-
-function buildMasterIndex({ catalogoProductos, invP, invA, invT, preciosadmin, preciosLocal }) {
-  const codes = new Set([
-    ...Object.keys(invP || {}),
-    ...Object.keys(invA || {}),
-    ...Object.keys(invT || {}),
-    ...Object.keys(preciosadmin || {}),
-    ...Object.keys(catalogoProductos || {})
-  ]);
-
-  const list = [];
-  const map = new Map();
-  const aliasMap = new Map();
-
-  for (const codigo of codes) {
-    const p = invP?.[codigo] || {};
-    const a = invA?.[codigo] || {};
-    const t = invT?.[codigo] || {};
-
-    const cat = (catalogoProductos && catalogoProductos[codigo]) ? catalogoProductos[codigo] : null;
-
-    const alias = normalizeAlias(cat?.ALIAS ?? cat?.alias ?? "");
-    const catProducto   = String(cat?.PRODUCTO ?? cat?.producto ?? "").trim();
-    const catDepto      = String(cat?.DEPARTAMENTO ?? cat?.departamento ?? "").trim();
-    const catCategoria  = String(cat?.CATEGORIA ?? cat?.categoria ?? "").trim();
-
-    const data  = preciosadmin?.[codigo] || {};
-    const local = preciosLocal?.[codigo] || {};
-    const merged = { ...data, ...local }; 
-
-    const stockP = Number(p.cantidad || 0);
-    const stockA = Number(a.cantidad || 0);
-    const stockT = Number(t.cantidad || 0);
-
-    const obj = {
-      codigo,
-      
-      producto: catProducto || "",
-      departamento: catDepto || "",
-      categoria: catCategoria || "",
-      alias: alias || "",
-      stockP,
-      stockA,
-      stockT,
-      stockTotal: stockP + stockA + stockT,
-      precios: {
-        precio: price0(merged.precio),
-        precioA: price0(merged.precioA),
-        precioB: price0(merged.precioB),
-        precioC: price0(merged.precioC),
-        mayoreo: price0(merged.mayoreo),
-        precioVendedor: price0(merged.precioVendedor)
-      },
-      admin: {
-        costo: Number(merged.costo ?? 0),
-        limite: Number(merged.limite ?? 0)
-      }
-    };
-
-    list.push(obj);
-    map.set(codigo, obj);
-    map.set(String(codigo).toLowerCase(), obj);
-    map.set(String(codigo).toUpperCase(), obj);
-
-    if (alias) {
-      aliasMap.set(alias, obj);
-      aliasMap.set(String(alias).toLowerCase(), obj);
-      aliasMap.set(String(alias).toUpperCase(), obj);
-    }
-  }
-
-  list.sort((x,y) => (x.producto||"").localeCompare(y.producto||"", "es"));
-  return { list, map, aliasMap };
-}
-
-
-
-
+// ✅ Buscar producto por ALIAS (código de barras)
 function getProdByAlias(alias){
   const key = normalizeAlias(alias);
   if (!key) return null;
@@ -1677,13 +1328,16 @@ function getProdByAlias(alias){
   );
 }
 
-
+// ✅ Stock disponible (Principal + Anexo + Tienda)
 function stockDisponibleTotal(prod){
   if (!prod) return 0;
   return Number(prod.stockP || 0) + Number(prod.stockA || 0) + Number(prod.stockT || 0);
 }
 
-
+/* ================= CACHE (offline) =================
+   - Guarda respuestas JSON en IndexedDB (fallback a localStorage)
+   - Si no hay conexión, usa la última copia guardada
+*/
 const __CACHE_DB_NAME = "fu_json_cache_v1";
 const __CACHE_STORE = "json";
 let __cacheDbPromise = null;
@@ -1721,7 +1375,7 @@ async function __cacheGet(url){
   const u = String(url || "");
   if (!u) return null;
 
-  
+  // 1) IndexedDB
   try {
     const db = await __openCacheDb();
     if (db) {
@@ -1736,7 +1390,7 @@ async function __cacheGet(url){
     }
   } catch {}
 
-  
+  // 2) localStorage fallback
   try {
     const raw = localStorage.getItem(__cacheKey('fuCacheJson', u));
     if (!raw) return null;
@@ -1752,17 +1406,17 @@ async function __cacheSet(url, data){
   if (!u) return;
   const ts = Date.now();
 
-  
+  // 1) IndexedDB
   try {
     const db = await __openCacheDb();
     if (db) {
       const tx = db.transaction(__CACHE_STORE, 'readwrite');
       tx.objectStore(__CACHE_STORE).put({ url: u, data, ts });
-      
+      // no await de tx.oncomplete para no bloquear UI
     }
   } catch {}
 
-  
+  // 2) localStorage fallback
   try {
     localStorage.setItem(__cacheKey('fuCacheJson', u), JSON.stringify(data));
     localStorage.setItem(__cacheKey('fuCacheJsonTs', u), String(ts));
@@ -1842,21 +1496,21 @@ async function fetchJson(url, opts = {}){
   }
 }
 
-
+// Avisos cortos cuando cambia el estado de conexión (útil en WebView)
 (function setupOnlineOfflineToasts(){
   try {
     window.addEventListener('offline', () => {
       try { showToast("Modo offline"); } catch {}
     });
     window.addEventListener('online', () => {
-      
+      // permitir que vuelva a mostrar el aviso de "usando caché" si cae la red otra vez
       try { __cacheOfflineToastShown = false; } catch {}
       try { showToast("Conexión restaurada ✅"); } catch {}
     });
   } catch {}
 })();
 
-
+/* ================= STATE ================= */
 let selectedRole = null;
 
 let nombreVendedor = localStorage.getItem("nombreVendedor") || "";
@@ -1870,12 +1524,11 @@ let catalogoAliasMap = new Map();
 let catalogoCargado = false;
 
 let cotizacionActual = null;
-let cotizacionEditMode = false; 
+let cotizacionEditMode = false; // ✅ true cuando editas una cotización guardada
 
 let pendingAction = null;
 
 let selectedProductCode = null;
-let selectedProductIsExclusive = false;
 
 let lastFile = { blob:null, url:null, filename:"cotizacion.pdf", mime:"application/pdf", title:"", text:"" };
 let logoDataUrlCache = null;
@@ -1883,10 +1536,10 @@ let logoDataUrlCache = null;
 let inventarioVersion = localStorage.getItem("inventarioVersion") || "0";
 let inventarioAdmin = [];
 
-
+// ADMIN home: INVENTARIO | COTIZACIONES
 let adminHomeMode = "INVENTARIO";
 
-
+/* ================= ELEMENTS ================= */
 const loginScreen = el("login");
 const appScreen = el("app");
 
@@ -1903,11 +1556,9 @@ const contenido = el("contenido");
 
 const headerTitle = el("headerTitle");
 
-const btnExclusivos = el("btnExclusivos");
-const exclusivosBuscar = el("exclusivosBuscar");
-const exclusivosBody = el("exclusivosBody");
 
 
+/* ================= SAFE AREA (Android navigation bar) ================= */
 (function setupSafeAreaBottom(){
   const set = () => {
     const vv = window.visualViewport;
@@ -1926,17 +1577,14 @@ const exclusivosBody = el("exclusivosBody");
     window.visualViewport.addEventListener("scroll", set);
   }
 })();
-
+/* ================= INIT ================= */
 async function initApp() {
   await checkVersionAndReload();
-  if (exclusivosBuscar) {
-    exclusivosBuscar.addEventListener("input", () => { try { renderExclusivos(); } catch {} });
-  }
   if (localStorage.getItem("role")) startApp();
 }
 initApp();
 
-
+/* ================= LOGIN ================= */
 function selectRole(role){
   selectedRole = role;
   roleText.textContent = `Rol: ${role}`;
@@ -1959,26 +1607,7 @@ function resetLogin(){
 function validatePin(){
   if (!selectedRole) return;
 
-  const pin = (pinInput.value || "").trim();
-
-  
-  if (selectedRole === "VENDEDOR") {
-    let resolvedRole = null;
-    if (pin === PINS.VENDEDOR) resolvedRole = "VENDEDOR";
-    else if (pin === PINS.VENDEDOR_JULIO) resolvedRole = "VENDEDOR_JULIO";
-    else if (pin === PINS.VENDEDOR_LEONARDI) resolvedRole = "VENDEDOR_LEONARDI";
-
-    if (resolvedRole) {
-      localStorage.setItem("role", resolvedRole);
-      startApp();
-      return;
-    }
-
-    pinError.classList.remove("hidden");
-    return;
-  }
-
-  if (pin === PINS[selectedRole]) {
+  if (pinInput.value === PINS[selectedRole]) {
     localStorage.setItem("role", selectedRole);
     startApp();
   } else {
@@ -1992,21 +1621,18 @@ if (pinInput) {
   });
 }
 
-
-
+// ✅ Compatibilidad: asegura que los handlers del HTML puedan llamar estas funciones
+// (útil si el archivo se sirve como módulo o en ciertos WebViews).
 try {
   window.selectRole = selectRole;
   window.validatePin = validatePin;
   window.resetLogin = resetLogin;
-  window.abrirModalExclusivos = abrirModalExclusivos;
-  window.cerrarModalExclusivos = cerrarModalExclusivos;
-  window.abrirModalAgregarProductoExclusivo = abrirModalAgregarProductoExclusivo;
-  
+  // HOME Vendedor
   window.venHomeSelect = venHomeSelect;
   window.renderVendedorHomeDashboard = renderVendedorHomeDashboard;
   window.abrirModalNuevoClienteDesdeHome = abrirModalNuevoClienteDesdeHome;
   window.compartirCotizacionGuardada = compartirCotizacionGuardada;
-  
+  // Ajustes (inventario offline)
   window.refreshInventoryNow = refreshInventoryNow;
   window.clearInventoryCache = clearInventoryCache;
 } catch (e) {}
@@ -2020,32 +1646,12 @@ function startApp(){
 
   const role = localStorage.getItem("role");
 
-  if (isMaintenanceRole(role)) {
-    renderMaintenanceScreen();
-    try { enablePhoneBackBehavior(); } catch {}
-    return;
-  }
-
-  if (btnExclusivos) {
-    const allow = isVendedorRole(role) || role === "ADMIN";
-    btnExclusivos.style.display = allow ? "inline-flex" : "none";
-  }
-
-  try {
-    if (isVendedorRole(role) || role === "ADMIN") loadExclusivos(true);
-  } catch {}
-
   vendedorHome.classList.add("hidden");
   operadorHome.classList.add("hidden");
   contenido.classList.add("hidden");
 
   if (operadorHomeUI) operadorHomeUI.classList.add("hidden");
   if (bodegueroHomeUI) bodegueroHomeUI.classList.add("hidden");
-
-  if (isMaintenanceRole(role)) {
-    renderMaintenanceScreen();
-    return;
-  }
 
   if (isVendedorRole(role)) {
     headerTitle.textContent = "Cotizaciones";
@@ -2057,14 +1663,14 @@ function startApp(){
     headerTitle.textContent = (role === "BODEGUERO") ? "Bodeguero" : "Operador";
     operadorHome.classList.remove("hidden");
 
-    
+    // ✅ UI distinta por rol (BODEGUERO NO cambia)
     if (role === "BODEGUERO") {
       if (operadorHomeUI) operadorHomeUI.classList.add("hidden");
       if (bodegueroHomeUI) bodegueroHomeUI.classList.remove("hidden");
     } else {
       if (bodegueroHomeUI) bodegueroHomeUI.classList.add("hidden");
       if (operadorHomeUI) operadorHomeUI.classList.remove("hidden");
-      
+      // Importante: retrasar para evitar TDZ (hay variables/lets definidas más abajo)
       setTimeout(() => renderOperadorHomeDashboard(), 0);
     }
   } else if (role === "RECEPCION") {
@@ -2093,7 +1699,7 @@ function startApp(){
     `;
   }
 
-  
+  // ✅ En móvil: capturar botón Atrás del teléfono para que funcione como el "Volver" de la app
   try { enablePhoneBackBehavior(); } catch {}
 
 }
@@ -2103,7 +1709,7 @@ function logout(){
   location.reload();
 }
 
-
+/* ================= VERSION CHECK ================= */
 async function checkVersionAndReload() {
   try {
     const versionData = await fetchJson(URLS.version);
@@ -2113,7 +1719,7 @@ async function checkVersionAndReload() {
       inventarioVersion = newVersion;
       localStorage.setItem("inventarioVersion", inventarioVersion);
 
-      
+      // invalidar caches
       catalogoCargado = false;
       inventarioAdmin = [];
 
@@ -2125,7 +1731,7 @@ async function checkVersionAndReload() {
   return false;
 }
 
-
+/* ================= MODAL VENDEDOR ================= */
 function abrirModalVendedor(){
   el("nombreVendedorInput").value = nombreVendedor || "";
   openModal("modalVendedor");
@@ -2161,7 +1767,7 @@ function ensureNombreVendedor(actionObj){
   return false;
 }
 
-
+/* ================= CATALOGO ================= */
 async function ensureCatalogoCargado(forceRefresh = false){
   if (catalogoCargado && !forceRefresh) return;
 
@@ -2172,25 +1778,90 @@ async function ensureCatalogoCargado(forceRefresh = false){
     fetchJson(URLS.invA),
     fetchJson(URLS.invT),
     fetchJson(URLS.preciosadmin),
-    fetchJsonFirstOk([URLS.catalogoProductos, BASE_RAW + "catalogo.json", BASE_RAW + "Catalogo.json"]).catch(() => ({}))
+    fetchJson(URLS.catalogoProductos).catch(() => ({}))
   ]);
 
-  
+  // ✅ aplicar cambios locales de ADMIN (si existen)
   const preciosLocal = JSON.parse(localStorage.getItem("preciosModificadosAdmin") || "{}");
 
-  const built = buildMasterIndex({ catalogoProductos, invP, invA, invT, preciosadmin, preciosLocal });
+  const codes = new Set([
+    ...Object.keys(invP || {}),
+    ...Object.keys(invA || {}),
+    ...Object.keys(invT || {}),
+    ...Object.keys(preciosadmin || {}),
+    ...Object.keys(catalogoProductos || {})
+  ]);
 
-  catalogo = built.list;
-  catalogoMap = built.map;
-  catalogoAliasMap = built.aliasMap;
-  inventarioAdmin = built.list.slice();
+  catalogo = [];
+  catalogoMap = new Map();
+  catalogoAliasMap = new Map();
+  inventarioAdmin = [];
+
+  for (const codigo of codes) {
+    const p = invP?.[codigo];
+    const a = invA?.[codigo];
+    const t = invT?.[codigo];
+
+    const base = p || t || a || {};
+    const cat = (catalogoProductos && catalogoProductos[codigo]) ? catalogoProductos[codigo] : null;
+    const alias = normalizeAlias(cat?.ALIAS ?? cat?.alias ?? "");
+    const catProducto = String(cat?.PRODUCTO ?? cat?.producto ?? "").trim();
+    const catDepto = String(cat?.DEPARTAMENTO ?? cat?.departamento ?? "").trim();
+    const catCategoria = String(cat?.CATEGORIA ?? cat?.categoria ?? "").trim();
+    const data = preciosadmin?.[codigo] || {};
+    const local = preciosLocal?.[codigo] || {};
+
+    const merged = { ...data, ...local }; // local sobreescribe GitHub
+
+    const stockP = Number(p?.cantidad || 0);
+    const stockA = Number(a?.cantidad || 0);
+    const stockT = Number(t?.cantidad || 0);
+
+    const obj = {
+      codigo,
+      producto: catProducto || base.producto || "",
+      departamento: catDepto || base.departamento || "",
+      categoria: catCategoria || "",
+      alias: alias || "",
+      stockP,
+      stockA,
+      stockT,
+      stockTotal: stockP + stockA + stockT,
+      precios: {
+        precio: price0(merged.precio),
+        precioA: price0(merged.precioA),
+        precioB: price0(merged.precioB),
+        precioC: price0(merged.precioC),
+        mayoreo: price0(merged.mayoreo),
+        precioVendedor: price0(merged.precioVendedor)
+      },
+      admin: {
+        costo: Number(merged.costo ?? 0),
+        limite: Number(merged.limite ?? 0)
+      }
+    };
+
+    catalogo.push(obj);
+    catalogoMap.set(codigo, obj);
+    // claves extra para evitar problemas por mayúsculas/minúsculas
+    catalogoMap.set(String(codigo).toLowerCase(), obj);
+    catalogoMap.set(String(codigo).toUpperCase(), obj);
+
+    if (alias) {
+      catalogoAliasMap.set(alias, obj);
+      catalogoAliasMap.set(String(alias).toLowerCase(), obj);
+      catalogoAliasMap.set(String(alias).toUpperCase(), obj);
+    }
+
+    inventarioAdmin.push(obj);
+  }
 
   catalogo.sort((x,y) => (x.producto||"").localeCompare(y.producto||"", "es"));
   inventarioAdmin.sort((x,y) => (x.producto||"").localeCompare(y.producto||"", "es"));
   catalogoCargado = true;
 }
 
-
+// === Acciones de Ajustes: sincronizar y limpiar caché ===
 function __getInvGroupLastSync(){
   const invUrls = [URLS.version, URLS.invP, URLS.invA, URLS.invT, URLS.preciosadmin, URLS.catalogoProductos];
   return Math.max(0, ...invUrls.map(u => __getLastSyncTsForUrl(u)));
@@ -2225,7 +1896,7 @@ async function clearInventoryCache(){
   try { updateSettingsInfo(); } catch {}
 }
 
-
+/* ================= INVENTARIO ADMIN ================= */
 async function abrirInventarioAdmin() {
   contenido.classList.remove("hidden");
   vendedorHome.classList.add("hidden");
@@ -2431,7 +2102,7 @@ function exportarPreciosAExcel() {
   compartirArchivo();
 }
 
-
+/* ================= CLIENTES (pantalla normal) ================= */
 function abrirClientes() {
   vendedorHome.classList.add("hidden");
   operadorHome.classList.add("hidden");
@@ -2528,7 +2199,7 @@ function volverHome(){
   if (isVendedorRole(role)) {
     headerTitle.textContent = "Cotizaciones";
     vendedorHome.classList.remove("hidden");
-    
+    // ✅ HOME VENDEDOR (dashboard)
     setTimeout(() => {
       if (typeof renderVendedorHomeDashboard === "function") renderVendedorHomeDashboard();
     }, 0);
@@ -2575,9 +2246,9 @@ function volverHome(){
 }
 
 
+/* ================= VENDEDOR: HOME DASHBOARD ================= */
 
-
-
+// Modo de resumen en HOME VENDEDOR: "saved" (cotizaciones) o "clientes".
 let venHomeSummaryMode = null;
 
 function getVenHomeSummaryMode(){
@@ -2588,8 +2259,8 @@ function getVenHomeSummaryMode(){
   return venHomeSummaryMode;
 }
 
-
-
+// Selecciona qué lista se muestra en el HOME (debajo de los KPIs)
+// opts: {scroll?: boolean, silent?: boolean}
 function venHomeSelect(mode, opts = {}){
   const m = (String(mode || "").trim().toLowerCase() === "clientes") ? "clientes" : "saved";
   venHomeSummaryMode = m;
@@ -2626,10 +2297,10 @@ function renderVendedorHomeDashboard(force = false){
   const kCli = el("venHomeKpiClientes");
   const body = el("venHomeSavedBody");
 
-  
+  // Si el HOME vendedor no está presente, no hacemos nada
   if (!kSaved && !kCli && !body) return;
 
-  
+  // refrescar data local
   try {
     cotizaciones = JSON.parse(localStorage.getItem("cotizaciones") || "[]");
   } catch { cotizaciones = []; }
@@ -2644,7 +2315,7 @@ function renderVendedorHomeDashboard(force = false){
   if (kSaved) kSaved.textContent = String(savedCount);
   if (kCli) kCli.textContent = String(cliCount);
 
-  
+  // activar estado visual + título
   updateVenHomeKpiActive();
 
   const mode = getVenHomeSummaryMode();
@@ -2735,9 +2406,9 @@ function renderVenHomeClientes(list){
 }
 
 
+/* ================= OPERADOR: HOME DASHBOARD ================= */
 
-
-
+// Modo de resumen en HOME OPERADOR: "psd" (pendientes de salida) o "pend" (pendientes de productos)
 let opHomeSummaryMode = null;
 
 function getOpHomeSummaryMode(){
@@ -2757,7 +2428,7 @@ function opHomeSelect(mode){
 
 
 function goOperadorHomePSD(){
-  
+  // Fuerza el modo del resumen del HOME a "Pendientes de salida"
   opHomeSummaryMode = "psd";
   localStorage.setItem("opHomeSummaryMode", "psd");
   volverHome();
@@ -2779,7 +2450,7 @@ function updateOpHomeKpiActive(){
 }
 
 function renderOperadorHomeDashboard(force = false){
-  
+  // Solo aplica al rol OPERADOR
   const role = localStorage.getItem("role");
   if (role !== "OPERADOR") return;
 
@@ -2789,7 +2460,7 @@ function renderOperadorHomeDashboard(force = false){
   const wSum = el("opHomeSummaryBody");
   const wMeta = el("opHomeSummaryMeta");
 
-  
+  // Si el HOME operador no está presente, no hacemos nada
   if (!kPSD && !kPend && !tSum && !wSum && !wMeta) return;
 
   const psd = (typeof getPendientesSalidaDespachoOp === "function" ? getPendientesSalidaDespachoOp() : []) || [];
@@ -2844,7 +2515,7 @@ function renderOpHomePSD(list){
     return `<div class="muted">No hay facturas pendientes de despacho.</div>`;
   }
 
-  
+  // Agrupar por motorista (SIN MOTORISTA aparte)
   const groups = {};
   arr.forEach(p => {
     const nombre = String(p.motoristaNombre || "").trim();
@@ -2853,7 +2524,7 @@ function renderOpHomePSD(list){
     groups[key].items.push(p);
   });
 
-  
+  // Ordenar por nombre (Sin motorista primero)
   const keys = Object.keys(groups).sort((a,b)=>{
     if (a === "__SIN__") return -1;
     if (b === "__SIN__") return 1;
@@ -2867,7 +2538,7 @@ function renderOpHomePSD(list){
     const open = (k === "__SIN__") ? "open" : "";
     const factBoxId = `opHomePSD_facturas_${idx}`;
 
-    
+    // Totales rápidos para el summary
     const agg = (typeof aggregateOpPSDProductos === "function")
       ? aggregateOpPSDProductos(g.items || [])
       : { totalEnviar: 0, totalPend: 0 };
@@ -2999,7 +2670,7 @@ function renderOpHomePend(list){
 
 
 
-
+/* ================= ADMIN: HOME COTIZACIONES ================= */
 function abrirAdminCotizacionesHome(){
   adminHomeMode = "COTIZACIONES";
   headerTitle.textContent = "Cotizaciones";
@@ -3023,7 +2694,7 @@ function abrirAdminCotizacionesHome(){
   `;
 }
 
-
+/* ================= COTIZACIONES UI ================= */
 function abrirCotizacion(){
   vendedorHome.classList.add("hidden");
   operadorHome.classList.add("hidden");
@@ -3070,7 +2741,7 @@ function volverDesdeCotizacion(){
 }
 
 function renderCotizacion(){
-  
+  // ✅ aplicar restricciones de tipos de precio según rol
   sanitizeCotizacionPriceTypesForRole();
   const cliente = getClienteSeleccionado();
 
@@ -3103,8 +2774,6 @@ function renderCotizacion(){
 
     <button type="button" onclick="abrirModalProductos()">➕ Agregar producto</button>
 
-    ${(isVendedorRole(getRole()) || getRole()==="ADMIN") ? `<button type="button" class="secondary" onclick="abrirModalExclusivos('select')">⭐ Agregar producto exclusivo</button>` : ""}
-
     <div id="cotItemsWrap"></div>
 
     <div class="total-box">
@@ -3128,16 +2797,6 @@ function getUnitPrice(prod, item){
     return Number(item.customPrice || 0);
   }
 
-  if (item.isExclusive) {
-    const t = String(item.priceType || "precio");
-    if (t === "precio") return Number(prod.precio || 0);
-    if (t === "precioA") return Number(prod.precioA || 0);
-    if (t === "precioB") return Number(prod.precioB || 0);
-    if (t === "precioC") return Number(prod.precioC || 0);
-    if (t === "mayoreo") return Number(prod.mayoreo || 0);
-    return Number(prod.precio || 0);
-  }
-
   const val = prod.precios?.[item.priceType];
   if (val !== undefined && val !== null) return Number(val || 0);
 
@@ -3147,7 +2806,7 @@ function getUnitPrice(prod, item){
 function itemKey(item){
   const p = item.priceType || "precio";
   const manual = (p === "precioVendedor") ? Number(item.customPrice || 0).toFixed(2) : "";
-  return `${item.codigo}__${p}__${manual}__${item.isExclusive ? 1 : 0}`;
+  return `${item.codigo}__${p}__${manual}`;
 }
 
 function normalizeItems(){
@@ -3170,7 +2829,7 @@ function calcularTotal(){
   if (!cotizacionActual) return 0;
   let total = 0;
   for (const it of cotizacionActual.items) {
-    const prod = getProdForItem(it);
+    const prod = getProdByCodigo(it.codigo);
     const unit = getUnitPrice(prod, it);
     total += Number(it.qty || 0) * unit;
   }
@@ -3189,7 +2848,7 @@ function renderItems(){
   }
 
   wrap.innerHTML = cotizacionActual.items.map(it => {
-    const prod = getProdForItem(it);
+    const prod = getProdByCodigo(it.codigo);
     const unit = getUnitPrice(prod, it);
     const sub = Number(it.qty || 0) * unit;
 
@@ -3314,7 +2973,7 @@ function removeItem(id){
   renderCotizacion();
 }
 
-
+/* ================= MODAL CLIENTES (cotización) ================= */
 function abrirModalClientes(){
   el("buscarClienteModal").value = "";
   renderClientesModal();
@@ -3353,7 +3012,7 @@ function seleccionarClienteCot(id){
   renderCotizacion();
 }
 
-
+// Origen del modal de nuevo cliente: "cot" (desde cotización) o "home" (desde HOME del vendedor)
 let nuevoClienteModalOrigin = "cot";
 
 function abrirModalNuevoClienteDesdeCot(){
@@ -3370,7 +3029,7 @@ function abrirModalNuevoClienteDesdeCot(){
   setTimeout(() => el("ncNombre").focus(), 50);
 }
 
-
+// Desde el HOME del vendedor (barra inferior "Clientes")
 function abrirModalNuevoClienteDesdeHome(){
   nuevoClienteModalOrigin = "home";
 
@@ -3401,7 +3060,7 @@ function guardarNuevoClienteModal(){
   clientes.push(nuevo);
   localStorage.setItem("clientes", JSON.stringify(clientes));
 
-  
+  // Si se abrió desde una cotización, seleccionarlo y volver a la cotización
   if (nuevoClienteModalOrigin === "cot") {
     cotizacionActual.clienteId = nuevo.id;
     cerrarModalNuevoCliente();
@@ -3409,12 +3068,12 @@ function guardarNuevoClienteModal(){
     return;
   }
 
-  
+  // Si se abrió desde el HOME, solo guardamos y refrescamos el HOME
   cerrarModalNuevoCliente();
   try { renderVendedorHomeDashboard(true); } catch {}
 }
 
-
+/* ================= MODAL PRODUCTOS + MODAL AGREGAR PRODUCTO ================= */
 function abrirModalProductos(){
   el("buscarProductoModal").value = "";
   renderProductosModal();
@@ -3427,7 +3086,7 @@ function cerrarModalProductos(){
 }
 
 
-
+/* ================= MODAL BARCODE (ALIAS) ================= */
 let __barcodeHandled = false;
 let __barcodeAllowNew = false;
 let __barcodeLookupFn = null;
@@ -3485,7 +3144,7 @@ function abrirModalBarcode(titulo = "Buscar por código de barras", subtitulo = 
   const input = el("barcodeInput");
   if (input) input.value = "";
 
-  
+  // reset
 __barcodeAllowNew = false;
 __barcodeLookupFn = null;
 __barcodeLastAlias = "";
@@ -3495,7 +3154,7 @@ window.__barcodeOnNewAlias = null;
 try { _barcodeToggleConfirm(false); } catch {}
 try { el("barcodeInput")?.removeAttribute("disabled"); } catch {}
 
-
+// resolver callback/opciones
 let onFound = null;
 if (typeof onFoundOrOpts === "function") {
   onFound = onFoundOrOpts;
@@ -3507,7 +3166,7 @@ if (typeof onFoundOrOpts === "function") {
   window.__barcodeOnNewAlias = (typeof onFoundOrOpts.onNewAlias === "function") ? onFoundOrOpts.onNewAlias : null;
 }
 
-
+// guardar callback
 window.__barcodeOnFound = (typeof onFound === "function") ? onFound : null;
 
   _setBarcodeStatus("", false);
@@ -3543,7 +3202,7 @@ async function abrirBarcodeVendedor(){
 }
 
 async function abrirBarcodeOperador(){
-  
+  // desde el modal de búsqueda del operador (entradas/salidas/traslado/conteo)
   try { await ensureCatalogoCargado(); } catch {}
   abrirModalBarcode(
     "Buscar por barras (Operador)",
@@ -3556,13 +3215,13 @@ async function abrirBarcodeOperador(){
 }
 
 async function abrirBarcodeAddMov(){
-  
+  // desde el modal rápido "Agregar producto" (Operador)
   try { await ensureCatalogoCargado(); } catch {}
 
   const isConteo = String(addMovTipo || "").toUpperCase() === "CONTEO";
   const quick = isConteo && isConteoQuickEnabled();
 
-  
+  // ⚡ CONTEO rápido: escaneo continuo (no pide cantidad, no cierra el modal de barras)
   if (quick) {
     const fixedQty = getConteoQuickQty();
     abrirModalBarcode(
@@ -3581,7 +3240,7 @@ async function abrirBarcodeAddMov(){
           }
         } catch {}
 
-        
+        // Preparar para el siguiente escaneo
         try { __barcodePendingProd = null; } catch {}
         try { __barcodeHandled = false; } catch {}
 
@@ -3625,7 +3284,7 @@ function onBarcodeInput(val){
 
   const prod = (__barcodeLookupFn ? __barcodeLookupFn(alias) : getProdByAlias(alias));
 
-  
+  // Mostrar feedback (cuando ya hay varios dígitos)
   if (!prod) {
     if (alias.length >= 6) {
       _setBarcodeStatus(
@@ -3645,7 +3304,7 @@ function onBarcodeInput(val){
     true
   );
 
-  
+  // Si este flujo requiere confirmar cantidad (ej: Recepción)
   if (__barcodePromptQty) {
     __barcodePendingProd = prod;
     __barcodeHandled = true;
@@ -3673,7 +3332,7 @@ if (barcodeInput) {
       return;
     }
 
-    
+    // ✅ Para lector físico: muchos lectores envían Enter al final
     if (e.key === "Enter") {
       e.preventDefault();
       onBarcodeInput(e.target.value);
@@ -3708,17 +3367,17 @@ function barcodeAceptarCantidad(){
     return;
   }
 
-  
+  // Ejecutar callback con (prod, qty)
   try {
     const fn = window.__barcodeOnFound;
     if (typeof fn === "function") fn(__barcodePendingProd, qty);
   } catch {}
 
-  
+  // Preparar para siguiente escaneo
   __barcodePendingProd = null;
   __barcodeHandled = false;
 
-  
+  // dejar visible el status del último producto, pero volver a modo escaneo
   try { _barcodeToggleConfirm(false); } catch {}
   try { el("barcodeInput")?.removeAttribute("disabled"); } catch {}
 }
@@ -3751,7 +3410,7 @@ function barcodeAgregarAlias(){
     }
   } catch {}
 
-  
+  // fallback: si existe el modal de recepción
   try { abrirModalRecepNuevoProd(alias); } catch {}
 }
 
@@ -3808,7 +3467,6 @@ if (buscarProductoModal) buscarProductoModal.addEventListener("input", renderPro
 
 function abrirModalAgregarProducto(codigo){
   const prod = getProdByCodigo(codigo);
-  selectedProductIsExclusive = false;
   if (!prod) return;
 
   cerrarModalProductos();
@@ -3890,70 +3548,8 @@ if (apTipoPrecio) {
   });
 }
 
-
-function abrirModalAgregarProductoExclusivo(codigo){
-  const raw = getExclusiveProdByCodigo(codigo);
-  if (!raw) return;
-
-  try { cerrarModalExclusivos(); } catch {}
-  try { cerrarModalExclusivoDetalle(); } catch {}
-
-  selectedProductCode = String(codigo);
-  selectedProductIsExclusive = true;
-
-  const role = getRole();
-  const allowedTypes = getAllowedPriceTypes(role);
-
-  const getVal = (t) => {
-    if (t === "precio") return raw.precio;
-    if (t === "precioA") return raw.precioA;
-    if (t === "precioB") return raw.precioB;
-    if (t === "precioC") return raw.precioC;
-    if (t === "mayoreo") return raw.mayoreo;
-    return raw.precio;
-  };
-
-  el("apTitulo").textContent = raw.producto || "";
-  el("apSub").textContent = `Código: ${selectedProductCode} • ⭐ EXCLUSIVO`;
-
-  const preciosHtml = allowedTypes
-    .filter(t => t !== "precioVendedor")
-    .map(t => {
-      const v = getVal(t);
-      const val = (v === undefined || v === null) ? "N/D" : moneyL(v);
-      return `<div class="k">${PRICE_LABELS[t] || t}</div><div class="v">${val}</div>`;
-    }).join("");
-
-  el("apListaPrecios").innerHTML = preciosHtml + (allowedTypes.includes("precioVendedor") ? `
-    <div class="k">${PRICE_LABELS.precioVendedor}</div><div class="v">Manual</div>
-  ` : "");
-
-  el("apCantidad").value = 1;
-
-  el("apTipoPrecio").innerHTML = allowedTypes.map(t => {
-    if (t === "precioVendedor") {
-      return `<option value="${t}">${PRICE_LABELS[t]} (manual)</option>`;
-    }
-    const v = getVal(t);
-    const val = (v === undefined || v === null) ? "N/D" : moneyL(v);
-    return `<option value="${t}">${PRICE_LABELS[t] || t} • ${val}</option>`;
-  }).join("");
-
-  const defaultType = allowedTypes.includes("precio") ? "precio" : (allowedTypes[0] || "precio");
-  el("apTipoPrecio").value = defaultType;
-
-  if (defaultType === "precioVendedor" && allowedTypes.includes("precioVendedor")) {
-    el("apPrecioManualWrap").classList.remove("hidden");
-  } else {
-    el("apPrecioManualWrap").classList.add("hidden");
-  }
-  el("apPrecioManual").value = "";
-
-  openModal("modalAgregarProducto");
-}
-
 function confirmarAgregarProducto(){
-  const prod = selectedProductIsExclusive ? getExclusiveProdByCodigo(selectedProductCode) : getProdByCodigo(selectedProductCode);
+  const prod = getProdByCodigo(selectedProductCode);
   if (!prod) return;
 
   const qty = Math.max(1, Number(el("apCantidad").value || 1));
@@ -3982,13 +3578,13 @@ function confirmarAgregarProducto(){
     }
   }
 
-  addItem(selectedProductCode, qty, priceType, customPrice, selectedProductIsExclusive);
+  addItem(prod.codigo, qty, priceType, customPrice);
 
   cerrarModalAgregarProducto();
   renderCotizacion();
 }
 
-function addItem(codigo, qty, priceType, customPrice, isExclusive){
+function addItem(codigo, qty, priceType, customPrice){
   if (!cotizacionActual || !Array.isArray(cotizacionActual.items)) return null;
 
   const c = normCode(codigo);
@@ -3996,40 +3592,37 @@ function addItem(codigo, qty, priceType, customPrice, isExclusive){
   const p = String(priceType || "precio");
   const cp = Number(customPrice || 0);
 
-  
-  let main = findMatchingItem(c, p, cp, !!isExclusive);
+  // Agregar / acumular el producto principal
+  let main = findMatchingItem(c, p, cp);
   if (main) {
     main.qty = Math.max(1, Number(main.qty || 1)) + q;
-    main.isExclusive = !!isExclusive;
   } else {
     main = {
       id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
       codigo: c,
       qty: q,
       priceType: p,
-      customPrice: cp,
-      isExclusive: !!isExclusive
+      customPrice: cp
     };
     cotizacionActual.items.push(main);
   }
 
-  
-  if (!main.isExclusive) syncLinkedPairForItem(main);
+  // Si el código está vinculado, asegurar que el par exista y quede con la misma cantidad
+  syncLinkedPairForItem(main);
 
   return main;
 }
 
-
+/* ================= GUARDAR COTIZACIÓN ================= */
 function buildCotizacionSnapshot(){
   const cliente = getClienteSeleccionado();
 
   const items = cotizacionActual.items.map(it => {
-    const prod = getProdForItem(it);
+    const prod = getProdByCodigo(it.codigo);
     const unit = getUnitPrice(prod, it);
     const qty = Number(it.qty || 0);
     return {
       codigo: it.codigo,
-      isExclusive: !!it.isExclusive,
       producto: prod?.producto || "",
       cantidad: qty,
       tipoPrecio: it.priceType,
@@ -4061,7 +3654,7 @@ function buildCotizacionSnapshot(){
 }
 
 
-
+/* ================= COTIZACIONES: UPSERT (evita duplicados) ================= */
 function upsertCotizacionSnapshot(snap, opts = {}){
   const silent = !!opts.silent;
 
@@ -4075,7 +3668,7 @@ function upsertCotizacionSnapshot(snap, opts = {}){
     const prev = cotizaciones[idx] || {};
     const merged = { ...prev, ...snap };
 
-    
+    // mantener editada si ya lo estaba
     merged.editada = !!(prev.editada || snap.editada);
 
     if (merged.editada) {
@@ -4109,7 +3702,7 @@ function guardarCotizacion(skipNameCheck = false){
   upsertCotizacionSnapshot(snap);
 }
 
-
+/* ================= PDF ================= */
 function blobToDataURL(blob){
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
@@ -4186,7 +3779,7 @@ async function crearPdfCotizacion(cot){
 
     doc.text("SOLO COTIZACIÓN", 40, 140, { align: "center", angle: 45 });
 
-    
+    // ✅ Si fue editada, agregar segunda marca de agua
     if (cot && cot.editada) {
       doc.setFontSize(14);
       doc.text("COTIZACIÓN EDITADA", 40, 160, { align: "center", angle: 45 });
@@ -4297,7 +3890,7 @@ async function crearPdfCotizacion(cot){
     const mmNeeded = (1 + nameLines.length + 1 + 1) * lineH + 6;
     ensureSpace(mmNeeded);
 
-    const letraPrecio = it.isExclusive ? "E" : (PRICE_CODE_LETTER[it.tipoPrecio] || "");
+    const letraPrecio = PRICE_CODE_LETTER[it.tipoPrecio] || "";
     const codigoConTipo = `${it.codigo}-${letraPrecio}`;
 
     doc.setFont("Helvetica", "bold");
@@ -4337,7 +3930,7 @@ async function crearPdfCotizacion(cot){
 
   const blob = doc.output("blob");
 
-  
+  // ✅ Guardar automáticamente la cotización al generar el PDF (sin duplicar)
   try {
     upsertCotizacionSnapshot(cot, { silent: true });
   } catch (e) {
@@ -4438,23 +4031,23 @@ function descargarArchivo() {
   a.click();
 }
 
-
-
-
+/* ================= HISTORIAL ================= */
+// ✅ Ya no usamos la pantalla vieja de "Cotizaciones guardadas".
+// Ahora todo se muestra directamente en el HOME del VENDEDOR.
 function abrirHistorialCotizaciones(){
   const role = localStorage.getItem("role");
   if (isVendedorRole(role)) {
-    
+    // Forzar a HOME y mostrar la vista de guardadas
     localStorage.setItem("venHomeSummaryMode", "saved");
     volverHome();
-    
+    // scroll suave al resumen
     setTimeout(() => {
       if (typeof venHomeSelect === "function") venHomeSelect("saved", { scroll: true, silent: true });
     }, 0);
     return;
   }
 
-  
+  // Fallback (por si algún otro rol lo usa)
   vendedorHome.classList.add("hidden");
   operadorHome.classList.add("hidden");
   contenido.classList.remove("hidden");
@@ -4518,22 +4111,22 @@ async function editarCotizacionGuardada(id){
     return;
   }
 
-  
+  // marcar modo edición (para marca de agua en PDF)
   cotizacionEditMode = true;
 
-  
+  // asegurar cliente en la lista para poder usar el selector normal
   let clienteId = "";
   if (c.cliente) {
     const norm = (s) => String(s || "").trim().toLowerCase();
 
     let found = null;
 
-    
+    // 1) RTN exacto (si existe)
     if (c.cliente.rtn && norm(c.cliente.rtn)) {
       found = clientes.find(x => norm(x.rtn) === norm(c.cliente.rtn));
     }
 
-    
+    // 2) Teléfono + nombre
     if (!found && c.cliente.telefono && norm(c.cliente.telefono)) {
       found = clientes.find(x =>
         norm(x.telefono) === norm(c.cliente.telefono) &&
@@ -4541,7 +4134,7 @@ async function editarCotizacionGuardada(id){
       );
     }
 
-    
+    // 3) Nombre + empresa
     if (!found && c.cliente.nombre) {
       found = clientes.find(x =>
         norm(x.nombre) === norm(c.cliente.nombre) &&
@@ -4575,12 +4168,11 @@ async function editarCotizacionGuardada(id){
       codigo: it.codigo || "",
       qty: Math.max(1, Number(it.cantidad || 1)),
       priceType: it.tipoPrecio || "precio",
-      customPrice: (it.tipoPrecio === "precioVendedor") ? Number(it.precioUnitario || 0) : 0,
-      isExclusive: !!it.isExclusive
+      customPrice: (it.tipoPrecio === "precioVendedor") ? Number(it.precioUnitario || 0) : 0
     }))
   };
 
-  
+  // normalizar por si hay líneas duplicadas
   normalizeItems();
 
   renderCotizacion();
@@ -4593,8 +4185,8 @@ function generarPdfDesdeGuardada(id){
   crearPdfCotizacion(c);
 }
 
-
-
+// En HOME del vendedor, el botón "Compartir" genera el PDF y, si es Android,
+// lanza el compartidor automáticamente.
 async function compartirCotizacionGuardada(id){
   try {
     cotizaciones = JSON.parse(localStorage.getItem("cotizaciones") || "[]");
@@ -4614,7 +4206,7 @@ async function compartirCotizacionGuardada(id){
     return;
   }
 
-  
+  // Auto-share solo en Android (en web dejamos la vista previa)
   if (window.Android && typeof window.Android.guardarPdfBase64 === "function") {
     try { compartirArchivo(); } catch {}
   }
@@ -4644,8 +4236,8 @@ function whatsappCliente(telefono) {
   window.open(url, "_blank");
 }
 
-
-let operadorEdit = null; 
+/* ================= OPERADOR: STATE ================= */
+let operadorEdit = null; // { tipo: "ENTRADA"|"SALIDA"|"TRASLADO"|"CONTEO", movId: string }
 
 let entradaFactura = null;
 let salidaFactura = null;
@@ -4655,7 +4247,7 @@ let conteoDoc = null;
 let operadorFilaActivaId = null;
 let operadorFilaActivaTipo = "ENTRADA";
 
-
+/* ================= OPERADOR: BORRADORES (autosave) ================= */
 const OP_DRAFT_PREFIX = "opDraft_";
 const OP_DRAFT_MAX_AGE_DAYS = 30;
 
@@ -4805,7 +4397,7 @@ async function borrarBorradorOperador(tipo){
 let facturasEntradas = JSON.parse(localStorage.getItem("facturasEntradas") || "[]");
 let facturasSalidas = JSON.parse(localStorage.getItem("facturasSalidas") || "[]");
 let transferencias = JSON.parse(localStorage.getItem("transferencias") || "[]");
-
+/* ================= OPERADOR: MOTORISTAS + PENDIENTES ================= */
 const LS_MOTORISTAS_OP = "op_motoristas";
 const LS_PENDIENTES_SALIDAS = "op_pendientes_salidas";
 const LS_PENDIENTES_SALIDA_DESPACHO = "op_pendientes_salida_despacho";
@@ -4847,13 +4439,13 @@ function getPendientesOp(){
 function savePendientesOp(){
   lsWrite(LS_PENDIENTES_SALIDAS, pendientesSalidasOp);
 
-  
+  // Refrescar widgets del HOME OPERADOR si existen
   try { if (el("opHomeSummaryBody")) renderOperadorHomeDashboard(); } catch(e){}
 }
 
 
 
-
+/* ===== OPERADOR: PENDIENTES DE SALIDA (cola de despacho) ===== */
 let salidasPendientesDespachoOp = null;
 
 function getPendientesSalidaDespachoOp(){
@@ -4867,7 +4459,7 @@ function getPendientesSalidaDespachoOp(){
 function savePendientesSalidaDespachoOp(){
   lsWrite(LS_PENDIENTES_SALIDA_DESPACHO, getPendientesSalidaDespachoOp());
 
-  
+  // Refrescar widgets del HOME OPERADOR si existen
   try { if (el("opHomeSummaryBody")) renderOperadorHomeDashboard(); } catch(e){}
 }
 
@@ -4901,7 +4493,7 @@ function upsertPendienteSalida(facturaNo, itemsPend, meta = {}){
   const totalPend = (itemsPend || []).reduce((acc,x)=> acc + Number(x.cantidad || 0), 0);
 
   if (!totalPend) {
-    
+    // si ya no hay pendientes, eliminar
     pendientesSalidasOp = pendientesSalidasOp.filter(p => String(p.facturaNo || "").trim() !== fno);
     savePendientesOp();
     return;
@@ -4941,7 +4533,7 @@ function getMotoristaNombreById(id){
   return m ? (m.nombre || "") : "";
 }
 
-
+/* ================= OPERADOR: MOTORISTAS ================= */
 async function abrirMotoristasOperador(){
   if (isBodeguero()) {
     await uiAlert("Esta opción es solo para el rol OPERADOR.");
@@ -5034,11 +4626,11 @@ async function eliminarMotoristaOperador(id){
   renderMotoristasOperador();
 }
 
+/* ================= OPERADOR: PENDIENTES ================= */
 
-
-
+/* ================= OPERADOR: PENDIENTES DE SALIDA (cola de despacho) ================= */
 async function abrirPendientesSalidaOperador(){
-  
+  // ✅ Ya no existe un módulo separado: todo se muestra en el HOME del OPERADOR.
   if (isBodeguero()) {
     await uiAlert("Esta opción es solo para el rol OPERADOR.");
     return;
@@ -5067,7 +4659,7 @@ function renderPendientesSalidaOperador(){
     return `<div class="muted">No hay facturas pendientes de despacho.</div>`;
   }
 
-  
+  // Agrupar por motorista (SIN MOTORISTA aparte)
   const groups = {};
   list.forEach(p => {
     const nombre = String(p.motoristaNombre || "").trim();
@@ -5178,7 +4770,7 @@ function aggregateOpPSDProductos(facturas){
   let totalPend = 0;
   let totalLines = 0;
 
-  
+  // Mantener el orden de las facturas tal como llegan (para el desglose por factura)
   const facturaOrder = [];
   const seenFactura = new Set();
 
@@ -5199,7 +4791,7 @@ function aggregateOpPSDProductos(facturas){
       if (!map[key]) {
         map[key] = { codigo: codigo || "—", producto: producto || "—", enviar: 0, pend: 0, byFactura: {} };
       } else {
-        
+        // preferir un código/nombre real si antes no había
         if (map[key].codigo === "—" && codigo) map[key].codigo = codigo;
         if (map[key].producto === "—" && producto) map[key].producto = producto;
       }
@@ -5210,7 +4802,7 @@ function aggregateOpPSDProductos(facturas){
       map[key].enviar += isFinite(c) ? c : 0;
       map[key].pend += isFinite(p) ? p : 0;
 
-      
+      // Desglose por factura
       if (!map[key].byFactura[fno]) map[key].byFactura[fno] = { facturaNo: fno, enviar: 0, pend: 0 };
       map[key].byFactura[fno].enviar += isFinite(c) ? c : 0;
       map[key].byFactura[fno].pend += isFinite(p) ? p : 0;
@@ -5230,7 +4822,7 @@ function aggregateOpPSDProductos(facturas){
       return String(a.codigo || "").localeCompare(String(b.codigo || ""));
     });
 
-  
+  // Normalizar desglose por factura a un arreglo en orden estable
   rows.forEach(r => {
     const bf = r.byFactura || {};
     r.facturas = facturaOrder
@@ -5464,7 +5056,7 @@ async function despacharSalidaPendienteDespachoUI(pendId){
     return;
   }
 
-  
+  // Validar que haya algo por despachar
   const items = Array.isArray(p.items) ? p.items : [];
   const itemsShip = items
     .filter(x => (x.codigo || "").trim() && Number(x.cantidad || 0) > 0)
@@ -5479,7 +5071,7 @@ async function despacharSalidaPendienteDespachoUI(pendId){
     return;
   }
 
-  
+  // Pedir motorista (SIEMPRE antes de despachar)
   const motoristas = await loadMotoristasRepo();
   const placas = await loadPlacasRepo();
   const r = await dsAbrir({
@@ -5525,23 +5117,23 @@ async function despacharSalidaPendienteDespachoUI(pendId){
     preparadoAtEpoch: p.creadoAtEpoch || 0
   };
 
-  
+  // Si queda pendiente de productos, guardarlo en el panel de pendientes de productos
   upsertPendienteSalida(snap.facturaNo, itemsPend, {
     ultimoMotorista: snap.motoristaNombre,
     ultimaPlaca: snap.placa
   });
 
-  
+  // Registrar movimiento
   facturasSalidas.unshift(snap);
   localStorage.setItem("facturasSalidas", JSON.stringify(facturasSalidas));
   registrarMovimiento("SALIDA", snap);
 
-  
+  // Eliminar de la cola de despacho
   removeSalidaPendienteDespacho(pendId);
 
   await uiAlert("✅ Despachado. Se guardó en Movimientos.");
 
-  
+  // Mantenerse en la vista actual (no navegar automáticamente)
   try {
     const w = el("opPSDWrap");
     if (w) w.innerHTML = renderPendientesSalidaOperador();
@@ -5569,7 +5161,7 @@ async function despacharGrupoPendientesSalidaOperador(groupKey){
     return;
   }
 
-  
+  // Pedir motorista (una sola vez)
   const motoristas = await loadMotoristasRepo();
 
   const defaultId = String(groupList.find(x => String(x.motoristaId || "").trim())?.motoristaId || "");
@@ -5592,7 +5184,7 @@ async function despacharGrupoPendientesSalidaOperador(groupKey){
   });
   if (!r) return;
 
-  
+  // Separar facturas despachables / no despachables
   const dispatchables = [];
   const skipped = [];
 
@@ -5633,7 +5225,7 @@ async function despacharGrupoPendientesSalidaOperador(groupKey){
   );
   if (!ok) return;
 
-  
+  // Despachar en lote
   for (const { p, itemsShip } of dispatchables) {
     const items = Array.isArray(p.items) ? p.items : [];
 
@@ -5672,24 +5264,24 @@ async function despacharGrupoPendientesSalidaOperador(groupKey){
       preparadoAtEpoch: p.creadoAtEpoch || 0
     };
 
-    
+    // Si queda pendiente de productos, guardarlo
     upsertPendienteSalida(snap.facturaNo, itemsPend, {
       ultimoMotorista: snap.motoristaNombre,
       ultimaPlaca: snap.placa
     });
 
-    
+    // Registrar movimiento
     facturasSalidas.unshift(snap);
     registrarMovimiento("SALIDA", snap);
 
-    
+    // Eliminar de la cola de despacho
     removeSalidaPendienteDespacho(p.id);
   }
 
-  
+  // Guardar facturasSalidas (una vez)
   localStorage.setItem("facturasSalidas", JSON.stringify(facturasSalidas));
 
-  
+  // Refrescar lista
   const w = el("opPSDWrap");
   if (w) w.innerHTML = renderPendientesSalidaOperador();
 
@@ -5820,7 +5412,7 @@ async function iniciarDespachoPendiente(facturaNo){
     fechaISO: hoy,
     facturaNo: fno,
     motoristaId: "",
-    
+    // Prefill del último despacho si existe
     motoristaNombre: String(p.ultimoMotorista || "").trim(),
     placa: String(p.ultimaPlaca || "").trim().toUpperCase(),
     dispatchMode: true,
@@ -5845,9 +5437,9 @@ let movimientos = JSON.parse(localStorage.getItem("movimientos") || "[]");
 let opInvStockFiltro = localStorage.getItem("opInvStockFiltro") || "TODOS";
 
 
-
+/* ================= OPERADOR: INVENTARIO ================= */
 async function abrirInventarioOperador(){
-  
+  // ✅ Inventario tipo tickets (igual que VISUALIZADOR). Sin precios.
   abrirConsultaInventarioVendedor();
 }
 
@@ -5909,7 +5501,7 @@ function renderInventarioOperador(){
 
 
 
-
+/* ================= OPERADOR: NEGATIVOS ================= */
 async function abrirNegativosOperador(){
   vendedorHome.classList.add("hidden");
   operadorHome.classList.add("hidden");
@@ -5977,7 +5569,7 @@ function renderNegativosOperador(){
   }).join("");
 }
 
-
+/* ================= OPERADOR: ENTRADAS ================= */
 async function abrirEntradasOperador(){
   vendedorHome.classList.add("hidden");
   operadorHome.classList.add("hidden");
@@ -6045,7 +5637,7 @@ async function abrirEntradasOperadorEditar(movId){
     });
   });
 
-  
+  // (sin filas vacías por defecto)
   renderEntradasOperador();
 }
 
@@ -6152,13 +5744,13 @@ function agregarFilaEntrada(){
     id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
     codigo: "",
     producto: "",
-    cantidad: "" 
+    cantidad: "" // ✅ en blanco
   });
 }
 
 function borrarFilaEntrada(id){
   entradaFactura.items = entradaFactura.items.filter(x => String(x.id) !== String(id));
-  
+  // (sin filas vacías por defecto)
   renderFilasEntrada();
   actualizarPreviewEntrada();
 }
@@ -6213,7 +5805,7 @@ function renderFilasEntrada(){
     `;
   }).join("");
 
-  
+  // ✅ refrescar sugerencias para filas existentes
   entradaFactura.items.forEach(it => updateSugerenciasEntrada(it.id));
 }
 
@@ -6238,7 +5830,7 @@ function updateSugerenciasEntrada(filaId){
   const raw = String(it.codigo || "").toLowerCase().trim();
   const formatted = formatCodigoAutoGuion(raw);
 
-  
+  // Si ya existe exacto, ocultar sugerencias
   if (formatted && getProdByCodigo(formatted)) {
     cont.innerHTML = "";
     return;
@@ -6327,7 +5919,7 @@ function onCantidadEntradaInput(id, value){
   actualizarPreviewEntrada();
 }
 
-
+/* ===== Modal buscar producto (OPERADOR) ===== */
 function abrirModalProductosOperador(filaId, tipo = "ENTRADA"){
   operadorFilaActivaId = filaId;
   operadorFilaActivaTipo = String(tipo || "ENTRADA").toUpperCase();
@@ -6378,7 +5970,7 @@ function seleccionarProductoOperador(codigo){
   const prod = getProdByCodigo(codigoFmt);
   const nombre = prod ? (prod.producto || "") : "";
 
-  
+  // ✅ Selección desde el modal "Agregar producto"
   if (operadorFilaActivaId === "__ADD__") {
     const codeEl = el("addMovCodigo");
     const prodEl = el("addMovProducto");
@@ -6464,7 +6056,7 @@ function seleccionarProductoOperador(codigo){
     it.codigo = codigoFmt;
     it.producto = nombre;
 
-    
+    // ✅ Sello por línea (fecha/hora) cuando se selecciona un producto en CONTEO
     if (codigoFmt && (prevCode !== String(codigoFmt).trim() || (!it.agregadoAtISO && !it.agregadoAtEpoch && !it.agregadoEn))) {
       ensureItemAgregadoTs(it, true);
     }
@@ -6483,18 +6075,18 @@ function seleccionarProductoOperador(codigo){
     return;
   }
 
-  
+  // default fallback
   cerrarModalProductosOperador();
 }
 
 
 
-
+/* ===== Modal: Agregar producto (OPERADOR - ENTRADAS / SALIDAS) ===== */
 let addMovTipo = "ENTRADA";
 
-
-
-
+// ✅ Conteo (Operador): modo rápido en modal "Agregar producto"
+// - Si está habilitado, al reconocer un producto (por código o por barras) se agrega automáticamente
+//   con una cantidad fija (configurable) y se deja listo para el siguiente escaneo.
 let __opConteoQuickEnabled = false;
 let __opConteoQuickQty = 1;
 
@@ -6526,7 +6118,7 @@ function renderAddMovQuickUi(){
   const isConteo = (String(addMovTipo || "").toUpperCase() === "CONTEO");
   const enabled = isConteo && isConteoQuickEnabled();
 
-  
+  // Solo aplica a CONTEO
   if (!wrap) return;
   wrap.classList.toggle("hidden", !isConteo);
 
@@ -6535,11 +6127,11 @@ function renderAddMovQuickUi(){
 
   if (qty) qty.value = String(getConteoQuickQty());
 
-  
+  // UI cantidad manual: ocultar si está en modo rápido
   if (qtyLabel) qtyLabel.classList.toggle("hidden", enabled);
   if (qtyRow) qtyRow.classList.toggle("hidden", enabled);
 
-  
+  // Aun si ocultamos, dejamos un valor “de respaldo” por si presionan Agregar.
   if (qtyInput) {
     if (enabled) {
       qtyInput.value = String(getConteoQuickQty());
@@ -6562,7 +6154,7 @@ function onAddMovQuickQtyInput(v){
   __opConteoQuickQty = n;
   try { localStorage.setItem("opConteoQuickQty", String(n)); } catch {}
 
-  
+  // si está visible, sincronizar el input oculto de qty para evitar validación
   try { if (el("addMovQty")) el("addMovQty").value = String(n); } catch {}
 }
 
@@ -6587,7 +6179,7 @@ function abrirModalAddMovItem(tipo){
   }
   if (el("addMovSug")) el("addMovSug").innerHTML = "";
 
-  
+  // UI extra de CONTEO (función rápida)
   try { renderAddMovQuickUi(); } catch {}
 
   openModal("modalAddMovItem");
@@ -6599,7 +6191,7 @@ function cerrarModalAddMovItem(){
 }
 
 function abrirBusquedaProductoParaAddMov(){
-  
+  // Reutiliza el modal existente de búsqueda por nombre/código
   abrirModalProductosOperador("__ADD__", addMovTipo);
 }
 
@@ -6614,7 +6206,7 @@ function onAddMovCodigoInput(val){
   const prod = getProdByCodigo(formatted);
   if (prodEl) prodEl.value = prod ? (prod.producto || "") : "";
 
-  
+  // ⚡ CONTEO: modo rápido => agregar automático al reconocer el producto
   if (
     String(addMovTipo || "").toUpperCase() === "CONTEO" &&
     isConteoQuickEnabled() &&
@@ -6636,7 +6228,7 @@ function onAddMovCodigoInput(val){
       actualizarPreviewConteo();
       try { showToast(`Agregado: ${qty} x ${prod.producto || formatted}`); } catch {}
 
-      
+      // limpiar y dejar listo para el siguiente
       try { if (el("addMovCodigo")) el("addMovCodigo").value = ""; } catch {}
       try { if (el("addMovProducto")) el("addMovProducto").value = ""; } catch {}
       try { if (el("addMovSug")) el("addMovSug").innerHTML = ""; } catch {}
@@ -6659,7 +6251,7 @@ function updateSugerenciasAddMov(){
   const raw = (el("addMovCodigo")?.value || "").toLowerCase().trim();
   const formatted = formatCodigoAutoGuion(raw);
 
-  
+  // Si ya existe exacto, ocultar sugerencias
   if (formatted && getProdByCodigo(formatted)) {
     cont.innerHTML = "";
     return;
@@ -6724,7 +6316,7 @@ function confirmarAddMovItem(){
   let qtyInput = String(el("addMovQty")?.value ?? "").trim();
   let qtyNum = Number(qtyInput);
 
-  
+  // ⚡ Si CONTEO y modo rápido, permitir cantidad vacía (usa la configurada)
   if (String(addMovTipo || "").toUpperCase() === "CONTEO" && isConteoQuickEnabled()) {
     if (qtyInput === "" || Number.isNaN(qtyNum)) {
       qtyNum = getConteoQuickQty();
@@ -6737,7 +6329,7 @@ function confirmarAddMovItem(){
     return;
   }
 
-  
+  // ENTRADA / SALIDA => mínimo 1, CONTEO => permite 0
   const qty = (addMovTipo === "CONTEO")
     ? Math.max(0, qtyNum)
     : Math.max(1, qtyNum);
@@ -6768,7 +6360,7 @@ function confirmarAddMovItem(){
     actualizarPreviewConteo();
   }
 
-  
+  // limpiar para seguir agregando rápido
   if (el("addMovCodigo")) el("addMovCodigo").value = "";
   if (el("addMovProducto")) el("addMovProducto").value = "";
   if (el("addMovQty")) el("addMovQty").value = "";
@@ -6801,7 +6393,7 @@ function addOrSumMovItem(arr, codigo, producto, qty, opts){
     existing.cantidad = prev + Number(qty || 0);
     existing.producto = producto || existing.producto || "";
 
-    
+    // Si estamos en CONTEO y el ítem venía de antes sin timestamp, lo sellamos.
     if (setTs && !existing.agregadoAtISO && !existing.agregadoAtEpoch && !existing.agregadoEn) {
       ensureItemAgregadoTs(existing, true);
     }
@@ -6820,14 +6412,14 @@ function addOrSumMovItem(arr, codigo, producto, qty, opts){
   arr.push(nuevo);
 }
 
-
+// Eventos del modal (input + Enter)
 el("addMovCodigo")?.addEventListener("input", (e) => onAddMovCodigoInput(e.target.value));
 el("addMovCodigo")?.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     e.preventDefault();
 
-    
-    
+    // ⚡ CONTEO rápido: muchos lectores mandan Enter al final.
+    // Re-evaluar y (si corresponde) auto-agregar; si no, comportamiento normal.
     if (String(addMovTipo || "").toUpperCase() === "CONTEO" && isConteoQuickEnabled()) {
       try { onAddMovCodigoInput(e.target.value); } catch {}
       try { el("addMovCodigo")?.focus(); } catch {}
@@ -6842,7 +6434,7 @@ el("addMovQty")?.addEventListener("keydown", (e) => {
 });
 
 
-
+/* ===== Vista previa fija ===== */
 function actualizarPreviewEntrada(){
   const cont = el("opFacturaPreview");
   if (!cont) return;
@@ -6872,7 +6464,7 @@ function actualizarPreviewEntrada(){
   saveOperadorDraft("ENTRADA", entradaFactura);
 }
 
-
+/* ===== Guardar ===== */
 function guardarFacturaEntradas(){
   const f = entradaFactura;
 
@@ -6882,7 +6474,7 @@ function guardarFacturaEntradas(){
       codigo: x.codigo,
       producto: x.producto || "",
       cantidad: Number(x.cantidad || 0),
-      
+      // ✅ Fecha/hora por línea (cuando se agregó el producto al conteo)
       agregadoEn: x.agregadoEn || "",
       agregadoAtISO: x.agregadoAtISO || "",
       agregadoAtEpoch: x.agregadoAtEpoch || ""
@@ -6913,7 +6505,7 @@ function guardarFacturaEntradas(){
     creadoAtISO: new Date().toISOString(),
     creadoAtEpoch: Date.now()};
 
-  
+  // ✅ EDITAR
   if (operadorEdit && operadorEdit.tipo === "ENTRADA") {
     actualizarMovimientoExistente(operadorEdit.movId, "ENTRADA", snap);
     alert("✅ Cambios guardados.");
@@ -6923,7 +6515,7 @@ function guardarFacturaEntradas(){
     return;
   }
 
-  
+  // ✅ NUEVO
   facturasEntradas.unshift(snap);
   localStorage.setItem("facturasEntradas", JSON.stringify(facturasEntradas));
 
@@ -6938,7 +6530,7 @@ function guardarFacturaEntradas(){
 
 
 
-
+/* ================= OPERADOR: SALIDAS ================= */
 async function abrirSalidasOperador(){
   vendedorHome.classList.add("hidden");
   operadorHome.classList.add("hidden");
@@ -7005,7 +6597,7 @@ async function abrirSalidasOperadorEditar(movId){
     });
   });
 
-  
+  // (sin filas vacías por defecto)
   renderSalidasOperador();
 }
 
@@ -7189,7 +6781,7 @@ function agregarFilaSalida(){
     id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
     codigo: "",
     producto: "",
-    cantidad: "" 
+    cantidad: "" // ✅ en blanco
   });
 
   renderFilasSalida();
@@ -7198,7 +6790,7 @@ function agregarFilaSalida(){
 
 function borrarFilaSalida(id){
   salidaFactura.items = salidaFactura.items.filter(x => x.id !== id);
-  
+  // (sin filas vacías por defecto)
   renderFilasSalida();
   actualizarPreviewSalida();
 }
@@ -7230,7 +6822,7 @@ function onCantidadSalidaInput(id, value){
   if (String(value || "").trim() === "") {
     it.cantidad = "";
     if (salidaFactura && salidaFactura.dispatchMode) {
-      
+      // si está en blanco, no se envía nada -> queda todo pendiente
       it.pendiente = Number(it.pendBase || it.pendiente || 0);
       const pi = el("opSPend_" + id);
       if (pi) pi.value = String(it.pendiente);
@@ -7265,7 +6857,7 @@ function onPendienteSalidaInput(id, value){
   const it = salidaFactura.items.find(x => x.id === id);
   if (!it) return;
 
-  if (salidaFactura && salidaFactura.dispatchMode) return; 
+  if (salidaFactura && salidaFactura.dispatchMode) return; // se calcula automáticamente en modo pendiente
 
   if (String(value || "").trim() === "") {
     it.pendiente = "";
@@ -7391,7 +6983,7 @@ function actualizarPreviewSalida(){
 }
 
 async function guardarFacturaSalidas(){
-  
+  // ✅ BODEGUERO: Salidas directas a Movimientos (sin motoristas / sin pendientes)
   if (isBodeguero()) {
     const f = salidaFactura || {};
     const facturaNo = String(f.facturaNo || "").trim();
@@ -7428,7 +7020,7 @@ async function guardarFacturaSalidas(){
       creadoAtEpoch: Date.now()
     };
 
-    
+    // Editar movimiento existente
     if (operadorEdit && operadorEdit.tipo === "SALIDA") {
       actualizarMovimientoExistente(operadorEdit.movId, "SALIDA", snap);
       operadorEdit = null;
@@ -7438,7 +7030,7 @@ async function guardarFacturaSalidas(){
       return;
     }
 
-    
+    // Registrar movimiento (directo)
     facturasSalidas.unshift(snap);
     localStorage.setItem("facturasSalidas", JSON.stringify(facturasSalidas));
     registrarMovimiento("SALIDA", snap);
@@ -7446,7 +7038,7 @@ async function guardarFacturaSalidas(){
     clearOperadorDraft("SALIDA");
     await uiAlert("✅ Salida guardada. Ya aparece en Movimientos.");
 
-    
+    // Mantenerse en Salidas (no navegar automáticamente)
     salidaFactura = {
       id: Date.now(),
       fechaISO: new Date().toISOString().slice(0,10),
@@ -7488,13 +7080,13 @@ async function guardarFacturaSalidas(){
     return;
   }
 
-  
+  // En modo despacho pendiente, no permitimos “solo pendientes” sin enviar nada (porque no cambia nada)
   if (f.dispatchMode && !itemsShip.length) {
     await uiAlert("En un despacho pendiente debes enviar al menos un producto (cantidad > 0).");
     return;
   }
 
-  
+  // Validación motorista/placa (opcional, pero recomendado)
   if (!String(f.motoristaId || "").trim() && !String(f.motoristaNombre || "").trim()) {
     const ok = await uiConfirm("No seleccionaste motorista. ¿Deseas guardar de todos modos?", { title: "Motorista", icon: "🚚", okText: "Guardar" });
     if (!ok) return;
@@ -7504,7 +7096,7 @@ async function guardarFacturaSalidas(){
     if (!ok) return;
   }
 
-  
+  // Si es una salida normal (no despacho pendiente) y NO estás editando, validar que la factura sea única
   if (!operadorEdit && !f.dispatchMode) {
     const existsMov = facturasSalidas.some(x => String(x.facturaNo || "").trim() === facturaNo);
     const existsPend = getPendientesSalidaDespachoOp().some(x => String(x.facturaNo || "").trim() === facturaNo);
@@ -7540,7 +7132,7 @@ async function guardarFacturaSalidas(){
     creadoAtEpoch: Date.now()
   };
 
-  
+  // ✅ EDITAR MOVIMIENTO (ya despachado)
   if (operadorEdit && operadorEdit.tipo === "SALIDA") {
     actualizarMovimientoExistente(operadorEdit.movId, "SALIDA", snap);
     await uiAlert("✅ Cambios guardados.");
@@ -7550,7 +7142,7 @@ async function guardarFacturaSalidas(){
     return;
   }
 
-  
+  // Items completos (para la cola de despacho)
   const itemsFull = f.items
     .filter(x => (x.codigo || "").trim() && (Number(x.cantidad || 0) > 0 || Number(x.pendiente || 0) > 0))
     .map(x => ({
@@ -7565,7 +7157,7 @@ async function guardarFacturaSalidas(){
     return;
   }
 
-  
+  // ✅ EDITAR FACTURA EN COLA (Pendientes de salida)
   if (operadorEdit && operadorEdit.tipo === "SALIDA_PENDIENTE") {
     const list = getPendientesSalidaDespachoOp();
     const idx = list.findIndex(x => String(x.id) === String(operadorEdit.pendId));
@@ -7594,15 +7186,15 @@ async function guardarFacturaSalidas(){
     return;
   }
 
-  
+  // ✅ DESPACHO DE PRODUCTOS PENDIENTES (sí registra movimiento)
   if (f.dispatchMode) {
-    
+    // Guardar/actualizar pendientes de productos
     upsertPendienteSalida(facturaNo, itemsPend, {
       ultimoMotorista: snap.motoristaNombre,
       ultimaPlaca: snap.placa
     });
 
-    
+    // Registrar movimiento solo si se enviaron unidades
     if (itemsShip.length) {
       facturasSalidas.unshift(snap);
       localStorage.setItem("facturasSalidas", JSON.stringify(facturasSalidas));
@@ -7620,7 +7212,7 @@ async function guardarFacturaSalidas(){
     return;
   }
 
-  
+  // ✅ NUEVA FACTURA: se envía a "Pendientes de salida" (NO a movimientos hasta despachar)
   const pendList = getPendientesSalidaDespachoOp();
   const ya = pendList.some(x => String(x.facturaNo || "").trim() === facturaNo);
   if (ya) {
@@ -7652,7 +7244,7 @@ async function guardarFacturaSalidas(){
   clearOperadorDraft("SALIDA");
   await uiAlert("✅ Factura enviada a Pendientes de salida. En el HOME del Operador (Pendientes de salida) puedes DESPACHARLA y así aparecerá en Movimientos.");
 
-  
+  // Volver al HOME (Pendientes de salida)
   salidaFactura = {
     id: Date.now(),
     fechaISO: f.fechaISO || new Date().toISOString().slice(0,10),
@@ -7667,7 +7259,7 @@ async function guardarFacturaSalidas(){
   goOperadorHomePSD();
   return;
 }
-
+/* ================= OPERADOR: TRANSFERENCIAS ================= */
 async function abrirTransferenciasOperador(){
   vendedorHome.classList.add("hidden");
   operadorHome.classList.add("hidden");
@@ -7686,7 +7278,7 @@ async function abrirTransferenciasOperador(){
   transferenciaDoc = {
     id: Date.now(),
     fechaISO: new Date().toISOString().slice(0,10),
-    direccion: "P_A", 
+    direccion: "P_A", // P_A o A_P
     referencia: "",
     items: []
   };
@@ -7865,7 +7457,7 @@ function agregarFilaTransferencia(){
     id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
     codigo: "",
     producto: "",
-    cantidad: "" 
+    cantidad: "" // ✅ en blanco
   });
 
   renderFilasTransferencia();
@@ -8048,7 +7640,7 @@ function guardarTransferencia(){
     creadoAtEpoch: Date.now()
   };
 
-  
+  // ✅ EDITAR
   if (operadorEdit && operadorEdit.tipo === "TRASLADO") {
     actualizarMovimientoExistente(operadorEdit.movId, "TRASLADO", snap);
     alert("✅ Cambios guardados.");
@@ -8058,7 +7650,7 @@ function guardarTransferencia(){
     return;
   }
 
-  
+  // ✅ NUEVO
   transferencias.unshift(snap);
   localStorage.setItem("transferencias", JSON.stringify(transferencias));
 
@@ -8070,7 +7662,7 @@ function guardarTransferencia(){
   abrirTransferenciasOperador();
 }
 
-
+/* ================= OPERADOR: CONTEOS ================= */
 async function abrirConteosOperador(){
   vendedorHome.classList.add("hidden");
   operadorHome.classList.add("hidden");
@@ -8094,7 +7686,7 @@ async function abrirConteosOperador(){
     items: []
   };
 
-  
+  // Inicia vacío: agregar productos desde el modal
   renderConteosOperador();
   renderFilasConteo();
   actualizarPreviewConteo();
@@ -8136,7 +7728,7 @@ async function abrirConteosOperadorEditar(movId){
       producto: x.producto || (prod ? (prod.producto || "") : ""),
       cantidad: Number(x.cantidad || 0) || 0,
 
-      
+      // ✅ Mantener sello por línea al editar (para que siga saliendo por línea en Excel)
       agregadoAtISO: x.agregadoAtISO || "",
       agregadoAtEpoch: x.agregadoAtEpoch || "",
       agregadoEn: x.agregadoEn || ""
@@ -8261,7 +7853,7 @@ function agregarFilaConteo(){
     id: String(Date.now()) + "_" + Math.random().toString(16).slice(2),
     codigo: "",
     producto: "",
-    cantidad: "" 
+    cantidad: "" // ✅ en blanco
   });
 
   renderFilasConteo();
@@ -8289,7 +7881,7 @@ function onCodigoConteoInput(id, value){
   const prod = getProdByCodigo(formatted);
   it.producto = prod ? (prod.producto || "") : "";
 
-  
+  // ✅ Sello por línea (fecha/hora) cuando el código se vuelve válido en CONTEO
   if (prod && formatted && (prevCode !== String(formatted).trim() || (!it.agregadoAtISO && !it.agregadoAtEpoch && !it.agregadoEn))) {
     ensureItemAgregadoTs(it, true);
   }
@@ -8356,7 +7948,7 @@ const it = conteoDoc.items.find(x => x.id === filaId);
   it.codigo = codigoDec;
   it.producto = prod ? (prod.producto || "") : "";
 
-  
+  // ✅ Sello por línea (fecha/hora) cuando se selecciona una sugerencia en CONTEO
   if (prod && codigoDec && (prevCode !== String(codigoDec).trim() || (!it.agregadoAtISO && !it.agregadoAtEpoch && !it.agregadoEn))) {
     ensureItemAgregadoTs(it, true);
   }
@@ -8436,7 +8028,7 @@ function guardarConteo(){
   const itemsOk = f.items
     .filter(x => (x.codigo || "").trim() && String(x.cantidad).trim() !== "" )
     .map(x => {
-      
+      // ✅ Asegurar sello por línea (si por alguna razón no se estableció al agregar/seleccionar)
       if (!x.agregadoAtISO && !x.agregadoAtEpoch && !x.agregadoEn) {
         try { ensureItemAgregadoTs(x, true); } catch {}
       }
@@ -8446,7 +8038,7 @@ function guardarConteo(){
         producto: x.producto || "",
         cantidad: Number(x.cantidad || 0),
 
-        
+        // ✅ Persistir timestamp por línea para exportación a Excel
         agregadoAtISO: x.agregadoAtISO || "",
         agregadoAtEpoch: x.agregadoAtEpoch || "",
         agregadoEn: x.agregadoEn || ""
@@ -8469,7 +8061,7 @@ function guardarConteo(){
     creadoAtEpoch: Date.now()
   };
 
-  
+  // ✅ EDITAR
   if (operadorEdit && operadorEdit.tipo === "CONTEO") {
     actualizarMovimientoExistente(operadorEdit.movId, "CONTEO", snap);
     alert("✅ Cambios guardados.");
@@ -8479,7 +8071,7 @@ function guardarConteo(){
     return;
   }
 
-  
+  // ✅ NUEVO
   conteos.unshift(snap);
   localStorage.setItem("conteos", JSON.stringify(conteos));
 
@@ -8492,7 +8084,7 @@ function guardarConteo(){
 }
 
 
-
+/* ================= OPERADOR: MOVIMIENTOS ================= */
 function movTipoLabel(tipo){
   switch (tipo) {
     case "ENTRADA": return "📥 Entrada";
@@ -8612,7 +8204,7 @@ function actualizarMovimientoExistente(movId, tipo, data){
   const idx = movimientos.findIndex(m => String(m.id) === String(movId));
 
   if (idx < 0) {
-    
+    // si no existe, lo registramos como nuevo
     registrarMovimiento(tipo, data);
   } else {
     movimientos[idx].tipo = tipo;
@@ -8625,7 +8217,7 @@ function actualizarMovimientoExistente(movId, tipo, data){
     localStorage.setItem("movimientos", JSON.stringify(movimientos));
   }
 
-  
+  // actualizar el array específico del tipo (por id de la factura/doc)
   const key = storeKeyByMovTipo(tipo);
   if (!key) return;
 
@@ -8638,7 +8230,7 @@ function actualizarMovimientoExistente(movId, tipo, data){
 
   localStorage.setItem(key, JSON.stringify(arr));
 
-  
+  // refrescar variables en memoria
   if (tipo === "ENTRADA") facturasEntradas = arr;
   if (tipo === "SALIDA") facturasSalidas = arr;
   if (tipo === "TRASLADO") transferencias = arr;
@@ -8667,11 +8259,11 @@ async function eliminarMovimientoOperador(movId){
   const ok = await uiConfirm(`¿Eliminar ${label} del ${mov.fecha}?`, { title: "Eliminar", icon: "🗑️", okText: "Eliminar", cancelText: "Cancelar" });
   if (!ok) return;
 
-  
+  // quitar de movimientos
   movimientos = movimientos.filter(m => String(m.id) !== String(movId));
   localStorage.setItem("movimientos", JSON.stringify(movimientos));
 
-  
+  // quitar del array específico
   const key = storeKeyByMovTipo(mov.tipo);
   if (key) {
     let arr = JSON.parse(localStorage.getItem(key) || "[]");
@@ -8705,7 +8297,7 @@ async function despacharGrupoPendientesSalidaOperador(groupKey){
     return;
   }
 
-  
+  // Pedir motorista (una sola vez)
   const motoristas = await loadMotoristasRepo();
 
   const defaultId = String(groupList.find(x => String(x.motoristaId || "").trim())?.motoristaId || "");
@@ -8728,7 +8320,7 @@ async function despacharGrupoPendientesSalidaOperador(groupKey){
   });
   if (!r) return;
 
-  
+  // Separar facturas despachables / no despachables
   const dispatchables = [];
   const skipped = [];
 
@@ -8769,7 +8361,7 @@ async function despacharGrupoPendientesSalidaOperador(groupKey){
   );
   if (!ok) return;
 
-  
+  // Despachar en lote
   for (const { p, itemsShip } of dispatchables) {
     const items = Array.isArray(p.items) ? p.items : [];
 
@@ -8808,24 +8400,24 @@ async function despacharGrupoPendientesSalidaOperador(groupKey){
       preparadoAtEpoch: p.creadoAtEpoch || 0
     };
 
-    
+    // Si queda pendiente de productos, guardarlo
     upsertPendienteSalida(snap.facturaNo, itemsPend, {
       ultimoMotorista: snap.motoristaNombre,
       ultimaPlaca: snap.placa
     });
 
-    
+    // Registrar movimiento
     facturasSalidas.unshift(snap);
     registrarMovimiento("SALIDA", snap);
 
-    
+    // Eliminar de la cola de despacho
     removeSalidaPendienteDespacho(p.id);
   }
 
-  
+  // Guardar facturasSalidas (una vez)
   localStorage.setItem("facturasSalidas", JSON.stringify(facturasSalidas));
 
-  
+  // Refrescar lista
   const w = el("opPSDWrap");
   if (w) w.innerHTML = renderPendientesSalidaOperador();
 
@@ -8925,7 +8517,7 @@ async function exportarMovimientosExcelYVaciar(){
     return;
   }
 
-  
+  // Para CONTEOS necesitamos el stock actual (se intenta cargar el catálogo).
   const necesitaCatalogo = movs.some(m => String(m?.tipo || "").toUpperCase() === "CONTEO");
   if (necesitaCatalogo) {
     try {
@@ -8951,7 +8543,7 @@ async function exportarMovimientosExcelYVaciar(){
   };
 
   const getUbicacion = (m) => {
-    
+    // Preferir lo guardado en el movimiento; si no existe, inferir por rol.
     if (m?.bodega) return m.bodega;
     if (m?.rol) return getBodegaByRole(m.rol);
     return getBodegaActual();
@@ -8967,7 +8559,7 @@ async function exportarMovimientosExcelYVaciar(){
     XLSX.utils.book_append_sheet(wb, ws, name);
   };
 
-  
+  /* ================= HOJA: ENTRADAS ================= */
   const entradasHeader = [
     "MovimientoID",
     "Usuario",
@@ -9029,7 +8621,7 @@ async function exportarMovimientosExcelYVaciar(){
 
   addSheetFromAoa("Entradas", entradasRows);
 
-  
+  /* ================= HOJA: SALIDAS ================= */
   const salidasHeader = [
     "MovimientoID",
     "Usuario",
@@ -9099,7 +8691,7 @@ async function exportarMovimientosExcelYVaciar(){
 
   addSheetFromAoa("Salidas", salidasRows);
 
-  
+  /* ================= HOJA: TRANSFERENCIAS ================= */
   const transferHeader = [
     "MovimientoID",
     "Usuario",
@@ -9163,7 +8755,7 @@ async function exportarMovimientosExcelYVaciar(){
 
   addSheetFromAoa("Transferencias", transferRows);
 
-  
+  /* ================= HOJA: CONTEOS ================= */
   const conteosHeader = [
     "MovimientoID",
     "Usuario",
@@ -9211,7 +8803,7 @@ async function exportarMovimientosExcelYVaciar(){
       items.forEach(it => {
         const codigo = String(it.codigo || "").trim();
 
-        
+        // Diferencias iniciales = stock actual del producto (según ubicación)
         let stockActual = "";
         try {
           const prod = getProdByCodigo(codigo);
@@ -9222,7 +8814,7 @@ async function exportarMovimientosExcelYVaciar(){
           }
         } catch {}
 
-                
+                // ✅ En CONTEO: "Realizado" por línea = momento en que se agregó el producto
         let realizadoLinea = realizado;
         if (it?.agregadoEn) {
           realizadoLinea = it.agregadoEn;
@@ -9250,7 +8842,7 @@ async function exportarMovimientosExcelYVaciar(){
 
   addSheetFromAoa("Conteos", conteosRows);
 
-  
+  // Exportar archivo
   const excelBuffer = XLSX.write(wb, { bookType: "xlsx", type: "array" });
   const blob = new Blob([excelBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 
@@ -9268,11 +8860,11 @@ async function exportarMovimientosExcelYVaciar(){
     blob.type
   );
 
-  
+  // ✅ Vaciar movimientos después de generar el archivo
   vaciarMovimientosOperador();
 
   mostrarArchivoGenerado("Excel generado", "Movimientos exportados y vaciados.");
-  
+  // ✅ Abrir compartir automáticamente (Android / Web)
   compartirArchivo();
 }
 
@@ -9294,24 +8886,23 @@ function vaciarMovimientosOperador(){
 
 
 
-
+/* ================= CONSULTA INVENTARIO (VENDEDOR) ================= */
 let invVendConsulta = [];
 let invVendConsultaCargado = false;
 
-let invVendStockFiltro = localStorage.getItem("invVendStockFiltro") || "TODOS"; 
-let invVendBodegaFiltro = localStorage.getItem("invVendBodegaFiltro") || "TODAS"; 
-let invVendDept = "";    
-let invVendCat = "";     
+let invVendStockFiltro = localStorage.getItem("invVendStockFiltro") || "TODOS"; // TODOS | CON | SIN
+let invVendDept = "";    // ej: "FONTANERIA"
+let invVendCat = "";     // ej: "PVC"
 
-let invVendDeptCats = new Map(); 
-let deptoVendMode = "DEPT";      
-let deptoVendDeptActual = "";    
+let invVendDeptCats = new Map(); // dept -> [cats]
+let deptoVendMode = "DEPT";      // DEPT | CAT
+let deptoVendDeptActual = "";    // dept seleccionado para ver categorías
 
 function splitDeptCat(depRaw){
   const s = String(depRaw || "").trim();
   if (!s) return { dept:"", cat:"" };
 
-  
+  // "FONTANERIA -PVC" => dept "FONTANERIA", cat "PVC"
   const parts = s.split("-");
   if (parts.length < 2) return { dept: s.trim(), cat:"" };
 
@@ -9326,66 +8917,53 @@ async function ensureInventarioConsultaVendedorCargado(){
 
   if (invVendConsultaCargado) return;
 
-  
-  const [invP, invA, invT, catalogoProductos] = await Promise.all([
+  const [invP, invA, invT] = await Promise.all([
     fetchJson(URLS.invP),
     fetchJson(URLS.invA),
-    fetchJson(URLS.invT),
-    fetchJsonFirstOk([URLS.catalogoProductos, BASE_RAW + "catalogo.json", BASE_RAW + "Catalogo.json"]).catch(() => ({}))
+    fetchJson(URLS.invT)
   ]);
 
   const codes = new Set([
     ...Object.keys(invP || {}),
     ...Object.keys(invA || {}),
-    ...Object.keys(invT || {}),
-    ...Object.keys(catalogoProductos || {})
+    ...Object.keys(invT || {})
   ]);
 
   invVendConsulta = [];
   invVendDeptCats = new Map();
 
   for (const codigo of codes) {
-    const p = invP?.[codigo] || {};
-    const a = invA?.[codigo] || {};
-    const t = invT?.[codigo] || {};
+    const p = invP?.[codigo];
+    const a = invA?.[codigo];
+    const t = invT?.[codigo];
 
-    const stockP = Number(p.cantidad || 0);
-    const stockA = Number(a.cantidad || 0);
-    const stockT = Number(t.cantidad || 0);
-    const stockTotal = stockP + stockA + stockT;
+    const producto = (p?.producto || t?.producto || a?.producto || "");
+    const depRaw = (p?.departamento || t?.departamento || a?.departamento || "");
 
-    const cat = (catalogoProductos && catalogoProductos[codigo]) ? catalogoProductos[codigo] : null;
-    
-    if (!cat && stockTotal === 0) continue;
-
-    const producto = String(cat?.PRODUCTO ?? cat?.producto ?? "").trim() || (stockTotal ? "SIN CATALOGO" : "");
-    const dept = String(cat?.DEPARTAMENTO ?? cat?.departamento ?? "").trim();
-    const catName = String(cat?.CATEGORIA ?? cat?.categoria ?? "").trim();
-
-    const depRaw = dept ? (dept + (catName ? " - " + catName : "")) : "";
+    const dc = splitDeptCat(depRaw);
 
     const item = {
       codigo,
       producto,
       departamentoRaw: depRaw,
-      dept,
-      cat: catName,
-      stockP,
-      stockA,
-      stockT
+      dept: dc.dept,
+      cat: dc.cat,
+      stockP: Number(p?.cantidad || 0),
+      stockA: Number(a?.cantidad || 0),
+      stockT: Number(t?.cantidad || 0)
     };
 
     invVendConsulta.push(item);
 
-    const d = (dept || "").trim();
+    const d = (dc.dept || "").trim();
     if (d) {
       if (!invVendDeptCats.has(d)) invVendDeptCats.set(d, new Set());
-      const c = (catName || "").trim();
+      const c = (dc.cat || "").trim();
       if (c) invVendDeptCats.get(d).add(c);
     }
   }
 
-  
+  // convertir sets a arrays ordenadas
   for (const [d, setCats] of invVendDeptCats.entries()) {
     invVendDeptCats.set(d, Array.from(setCats).sort((x,y)=>String(x).localeCompare(String(y), "es")));
   }
@@ -9444,16 +9022,6 @@ function abrirConsultaInventarioVendedor(){
       <button type="button" class="secondary filter-btn" id="invVendF_SIN" onclick="setInvVendStockFiltro('SIN')">Sin stock</button>
     </div>
 
-
-    ${onlyA ? "" : `
-    <div class="filter-row" style="margin-top:8px;">
-      <button type="button" class="secondary filter-btn" id="invVendB_TODAS" onclick="setInvVendBodegaFiltro('TODAS')">Todas</button>
-      <button type="button" class="secondary filter-btn" id="invVendB_P" onclick="setInvVendBodegaFiltro('P')">Principal</button>
-      <button type="button" class="secondary filter-btn" id="invVendB_A" onclick="setInvVendBodegaFiltro('A')">Anexo</button>
-      <button type="button" class="secondary filter-btn" id="invVendB_T" onclick="setInvVendBodegaFiltro('T')">Tienda</button>
-    </div>
-    `}
-
     <button type="button" class="secondary" id="invVendDeptBtn" onclick="abrirModalDeptoVend()">🏷️ Filtrar por departamento (Todos)</button>
 
     <div class="muted" id="invVendFiltrosInfo" style="margin-top:-2px; margin-bottom:10px;"></div>
@@ -9464,7 +9032,6 @@ function abrirConsultaInventarioVendedor(){
   el("invVendSearch")?.addEventListener("input", renderConsultaInventarioVendedor);
 
   updateInvVendFilterButtons();
-  updateInvVendBodegaButtons();
   updateBtnDeptoVend();
   updateInvVendFiltrosInfo();
 
@@ -9472,7 +9039,7 @@ function abrirConsultaInventarioVendedor(){
 
   ensureInventarioConsultaVendedorCargado()
     .then(async () => {
-      
+      // ✅ en ADMIN precargar precios para abrir el modal rápido
       if (isAdmin) {
         try { await ensureCatalogoCargado(); } catch {}
       }
@@ -9510,44 +9077,6 @@ function updateInvVendFilterButtons(){
   });
 }
 
-function setInvVendBodegaFiltro(val){
-  invVendBodegaFiltro = String(val || "TODAS").toUpperCase();
-  if (!["TODAS","P","A","T"].includes(invVendBodegaFiltro)) invVendBodegaFiltro = "TODAS";
-  localStorage.setItem("invVendBodegaFiltro", invVendBodegaFiltro);
-  updateInvVendBodegaButtons();
-  updateInvVendFiltrosInfo();
-  renderConsultaInventarioVendedor();
-}
-
-function updateInvVendBodegaButtons(){
-  ["TODAS","P","A","T"].forEach(k => {
-    const btn = el("invVendB_" + k);
-    if (!btn) return;
-    btn.classList.toggle("active", invVendBodegaFiltro === k);
-  });
-}
-
-function invVendBodegaLabel(){
-  if (invVendBodegaFiltro === "P") return "Principal";
-  if (invVendBodegaFiltro === "A") return "Anexo";
-  if (invVendBodegaFiltro === "T") return "Tienda";
-  return "Total";
-}
-
-function invVendTotalPorFiltro(p, role){
-  const isBode = role === "BODEGUERO";
-  const sp = Number(p.stockP || 0);
-  const sa = Number(p.stockA || 0);
-  const st = Number(p.stockT || 0);
-
-  if (isBode) return sa;
-
-  if (invVendBodegaFiltro === "P") return sp;
-  if (invVendBodegaFiltro === "A") return sa;
-  if (invVendBodegaFiltro === "T") return st;
-  return sp + sa + st;
-}
-
 function updateBtnDeptoVend(){
   const btn = el("invVendDeptBtn");
   if (!btn) return;
@@ -9569,17 +9098,8 @@ function updateInvVendFiltrosInfo(){
   const info = el("invVendFiltrosInfo");
   if (!info) return;
 
-  const role = localStorage.getItem("role") || "";
-  const isBode = role === "BODEGUERO";
-
   const parts = [];
   parts.push(`Stock: <b>${invVendStockFiltro === "TODOS" ? "Todos" : (invVendStockFiltro === "CON" ? "Con stock" : "Sin stock")}</b>`);
-
-  if (!isBode) {
-    parts.push(`Bodega: <b>${escapeHtml(invVendBodegaLabel())}</b>`);
-  } else {
-    parts.push("Bodega: <b>Anexo</b>");
-  }
 
   if (invVendDept) {
     if (invVendCat) parts.push(`Depto: <b>${escapeHtml(invVendDept)} - ${escapeHtml(invVendCat)}</b>`);
@@ -9603,7 +9123,7 @@ function renderConsultaInventarioVendedor(){
 
   const filtrados = invVendConsulta
     .filter(p => {
-      
+      // buscador
       if (q) {
         const match =
           (p.codigo || "").toLowerCase().includes(q) ||
@@ -9611,15 +9131,17 @@ function renderConsultaInventarioVendedor(){
         if (!match) return false;
       }
 
-      
-      const total = invVendTotalPorFiltro(p, role);
+      // filtro stock (total)
+      const total = isBode
+        ? Number(p.stockA || 0)
+        : (Number(p.stockP || 0) + Number(p.stockA || 0) + Number(p.stockT || 0));
 
       if (invVendStockFiltro === "CON") return total > 0;
       if (invVendStockFiltro === "SIN") return total <= 0;
       return true;
     })
     .filter(p => {
-      
+      // filtro dept/cat
       if (!invVendDept) return true;
       if ((p.dept || "").trim() !== invVendDept) return false;
       if (invVendCat && (p.cat || "").trim() !== invVendCat) return false;
@@ -9633,7 +9155,9 @@ function renderConsultaInventarioVendedor(){
   }
 
   cont.innerHTML = filtrados.map(p => {
-    const total = invVendTotalPorFiltro(p, role);
+    const total = isBode
+      ? Number(p.stockA || 0)
+      : (Number(p.stockP || 0) + Number(p.stockA || 0) + Number(p.stockT || 0));
 
     const depTxt = (p.dept || "").trim()
       ? `${escapeHtml(p.dept)}${(p.cat || "").trim() ? " - " + escapeHtml(p.cat) : ""}`
@@ -9652,7 +9176,7 @@ function renderConsultaInventarioVendedor(){
       cls = "ticket clickable";
     }
 
-    const totalLabel = isBode ? "Anexo" : invVendBodegaLabel();
+    const totalLabel = isBode ? "Anexo" : "Total";
 
     const stocksHtml = isBode
       ? `<span class="pill pill-a">Anexo: ${Number(p.stockA || 0)}</span>`
@@ -9682,7 +9206,7 @@ function renderConsultaInventarioVendedor(){
 }
 
 
-
+/* ===== Modal precios producto (consulta inventario) ===== */
 async function abrirModalPreciosProductoVendedor(codeEnc){
   const codigo = decodeURIComponent(codeEnc || "");
   if (!codigo) return;
@@ -9725,7 +9249,7 @@ function cerrarModalPreciosProducto(){
   closeModal("modalPreciosProducto");
 }
 
-
+/* ===== ADMIN: abrir modal editable desde consulta ===== */
 async function abrirModalDetallesProductoDesdeConsulta(codeEnc){
   const codigo = decodeURIComponent(codeEnc || "");
   if (!codigo) return;
@@ -9739,7 +9263,7 @@ async function abrirModalDetallesProductoDesdeConsulta(codeEnc){
   abrirModalDetallesProducto(codigo);
 }
 
-
+/* ===== ADMIN: exportar precios a Excel (y compartir) ===== */
 async function exportarPreciosAExcelAdmin(){
   try {
     await ensureCatalogoCargado();
@@ -9749,9 +9273,9 @@ async function exportarPreciosAExcelAdmin(){
   exportarPreciosAExcel();
 }
 
-
+/* ===== Modal filtro Depto/Categoría (VENDEDOR) ===== */
 function abrirModalDeptoVend(){
-  
+  // Si aún no carga, abrir con "cargando..."
   openModal("modalDeptoVend");
 
   deptoVendMode = "DEPT";
@@ -9828,7 +9352,7 @@ function renderDeptoVendLista(){
     return;
   }
 
-  
+  // CAT
   const cats = invVendDeptCats.get(deptoVendDeptActual) || [];
   const base = ["__TODAS__", ...cats];
   const filtrados = base.filter(c => {
@@ -9866,7 +9390,7 @@ function seleccionarDeptoVend(deptEnc){
 
   const cats = invVendDeptCats.get(dept) || [];
   if (!cats.length) {
-    
+    // ✅ no tiene categorías => cerrar y filtrar por dept
     updateBtnDeptoVend();
     updateInvVendFiltrosInfo();
     cerrarModalDeptoVend();
@@ -9874,7 +9398,7 @@ function seleccionarDeptoVend(deptEnc){
     return;
   }
 
-  
+  // ✅ tiene categorías => mostrar categorías
   deptoVendMode = "CAT";
   deptoVendDeptActual = dept;
 
@@ -9899,7 +9423,7 @@ function seleccionarCatVend(catEnc){
 }
 
 
-
+/* ================= ADMIN: CALCULADORA CERÁMICA ================= */
 
 let ceramicaDocs = JSON.parse(localStorage.getItem("ceramicaDocs") || "[]");
 let ceramicaDraft = null;
@@ -9933,20 +9457,20 @@ function __cerCategoria(p){
   if (blob.includes("IVORY")) return "IVORY";
   if (blob.includes("PORCEL")) return "PORCELANATO";
   if (blob.includes("CERAM") || blob.includes("AZULE") || blob.includes("PISO") || blob.includes("BALDOSA")) return "CERAMICA";
-  
+  // Si no cae en nada, lo dejamos fuera del selector (para evitar ruido)
   return "";
 }
 
 
 function __parseCajaInfo(p){
-  
+  // Intenta detectar piezas por caja / m² por caja desde producto/alias.
   const raw = `${p?.producto || ""} ${p?.alias || ""}`.trim();
 
-  
+  // Unidad sugerida (heurística simple)
   let unidad = "PIEZA";
   if (/(\bCAJA\b|\bCAJAS\b|\bCJA\b|\bBOX\b)/i.test(raw)) unidad = "CAJA";
 
-  
+  // 1) Piezas por caja explícito (ej: "4 PZ", "4 PZS", "4 PIEZAS", "PZ/CAJA 4")
   let ppc = 0;
 
   let m = raw.match(/(?:PZ\s*\/\s*CAJA|PZS\s*\/\s*CAJA|PZAS\s*\/\s*CAJA)\s*(\d+(?:[\.,]\d+)?)/i);
@@ -9955,7 +9479,7 @@ function __parseCajaInfo(p){
     ppc = Number(String(m[1]).replace(",", ".")) || 0;
   }
 
-  
+  // 2) m² por caja (ej: "1.44M2", "1,44 m²")
   let m2Caja = 0;
   const m2m = raw.match(/(\d+(?:[\.,]\d+)?)\s*(?:M2|M²)\b/i);
   if (m2m) {
@@ -9970,10 +9494,10 @@ function __ppcFromM2(m2Caja, areaPieza){
   const ap = Number(areaPieza) || 0;
   if (m2 <= 0 || ap <= 0) return 0;
 
-  const ratio = m2 / ap; 
+  const ratio = m2 / ap; // piezas por caja aproximado
   if (!isFinite(ratio) || ratio <= 0) return 0;
 
-  
+  // Si cae muy cerca de un entero, redondeamos; si no, usamos ceil por seguridad.
   const near = Math.round(ratio);
   if (near > 0 && Math.abs(ratio - near) / near <= 0.03) return near;
   return Math.ceil(ratio);
@@ -10002,7 +9526,7 @@ function __maybeAutoPpc(it){
 }
 
 function __getCeramicas(){
-  
+  // inventarioAdmin ya está ordenado por producto
   return (Array.isArray(inventarioAdmin) ? inventarioAdmin : [])
     .filter(p => __cerCategoria(p));
 }
@@ -10010,7 +9534,7 @@ function __getCeramicas(){
 function __newCerItem(){
   return {
     id: __cerId(),
-    modo: "AREA", 
+    modo: "AREA", // AREA | TENGO
     cerCodigo: "",
     cerNombre: "",
     cerAlias: "",
@@ -10022,13 +9546,13 @@ function __newCerItem(){
     desperdicioPct: 10,
 
     piezasPorCaja: "",
-    inventarioUnidad: "PIEZA", 
+    inventarioUnidad: "PIEZA", // PIEZA | CAJA
 
 
-    
-    m2PorCaja: "",      
-    ppcAuto: false,     
-    ppcHint: "",        
+    // autodetección (opcional)
+    m2PorCaja: "",      // cuando el nombre/alias trae "1.44 m2"
+    ppcAuto: false,     // true si el sistema está ajustando Pz/Caja automáticamente
+    ppcHint: "",        // texto informativo debajo de Pz/Caja
     areaM2: "",
     tengoCant: ""
   };
@@ -10044,7 +9568,7 @@ function __newCerDoc(){
 }
 
 async function openCeramicaCalcScreen(docId){
-  
+  // Mantener el "home mode" en inventario para que el botón Home vuelva donde corresponde
   adminHomeMode = "INVENTARIO";
 
   try { await ensureCatalogoCargado(false); } catch(e){ console.warn(e); }
@@ -10250,12 +9774,12 @@ function cerListItemHTML(it, idx){
 }
 
 
+/* ================= WIZARD (MODAL) ================= */
 
-
-let cerWizardState = null; 
+let cerWizardState = null; // { step, isNew, itemId, item }
 
 function cerOpenWizard(itemId, opts){
-  
+  // Compatibilidad: si el primer parámetro es un objeto, es opts
   let _itemId = itemId;
   let _opts = opts || {};
   if (_itemId && typeof _itemId === "object") {
@@ -10288,7 +9812,7 @@ function cerOpenWizard(itemId, opts){
     openDims: false
   };
 
-  
+  // Presets rápidos (solo para "nuevo")
   if (isNew && _opts && _opts.preset) {
     const p = String(_opts.preset || "");
     if (p === "area") {
@@ -10524,7 +10048,7 @@ function cerWizRender(){
   const body = el("cerWizBody");
   if (!body) return;
 
-  
+  // footer buttons
   const prevBtn = el("cerWizPrevBtn");
   const nextBtn = el("cerWizNextBtn");
   const saveBtn = el("cerWizSaveBtn");
@@ -10533,7 +10057,7 @@ function cerWizRender(){
   if (nextBtn) nextBtn.style.display = (step >= 5) ? "none" : "inline-block";
   if (saveBtn) saveBtn.style.display = (step >= 5) ? "inline-block" : "none";
 
-  
+  // Render step body
   if (step === 1) {
     const prodCard = it.cerNombre ? `
       <div class="card-lite">
@@ -10704,7 +10228,7 @@ function cerWizRender(){
     `;
   }
 
-  
+  // refrescar métricas live si el step las necesita
   cerWizRefreshLive();
 }
 
@@ -10712,16 +10236,16 @@ function cerWizRefreshLive(){
   const it = cerWizardState?.item;
   if (!it) return;
 
-  
+  // step 2: área por pieza
   const areaPieza = (Number(it.anchoCm)||0)/100 * (Number(it.altoCm)||0)/100;
   const ap = el("cerWizAreaPieza");
   if (ap) ap.textContent = __fmt2(areaPieza || 0);
 
-  
+  // step 3: hint
   const hint = el("cerWizPpcHint");
   if (hint) hint.textContent = String(it.ppcHint || "");
 
-  
+  // step 5: waste label + result
   const wl = el("cerWizWasteLbl");
   if (wl) wl.textContent = `${__fmtInt(it.desperdicioPct || 0)}%`;
 
@@ -10749,7 +10273,7 @@ function cerWizSave(){
   if (!cerWizardState) return;
   cerWizError("");
 
-  
+  // Validación completa
   const ok = cerWizValidateStep(5);
   if (!ok.ok) {
     cerWizError(ok.msg || "Revisa los datos.");
@@ -10759,7 +10283,7 @@ function cerWizSave(){
   const it = cerWizardState.item;
   if (!it) return;
 
-  
+  // commit
   if (cerWizardState.isNew) {
     ceramicaDraft.items.push(it);
   } else {
@@ -10775,7 +10299,7 @@ function cerSetTitulo(v){
   if (!ceramicaDraft) return;
   ceramicaDraft.titulo = String(v || "");
 
-  
+  // Refrescar UI (panel y modal)
   const lbl = el("cerPdfTitle");
   if (lbl) lbl.textContent = ceramicaDraft.titulo || "Sin título";
 
@@ -10858,7 +10382,7 @@ function cerRemoveItem(itemId){
 
   ceramicaDraft.items = ceramicaDraft.items.filter(x => String(x?.id) !== String(itemId));
 
-  
+  // Mantener al menos 1 cálculo
   if (!ceramicaDraft.items.length) ceramicaDraft.items.push(__newCerItem());
 
   renderCeramicaCalcScreen();
@@ -10868,7 +10392,7 @@ function cerDuplicateItem(itemId){
   const it = cerFind(itemId);
   if (!it) return;
 
-  
+  // abrir wizard como "nuevo" con los mismos datos (sin afectar la lista hasta guardar)
   cerOpenWizardPrefill(it);
 }
 
@@ -10928,7 +10452,7 @@ function cerDuplicateLast(){
 function cerCompute(it){
   const w = Number(it.anchoCm)||0;
   const h = Number(it.altoCm)||0;
-  const areaPieza = (w/100) * (h/100); 
+  const areaPieza = (w/100) * (h/100); // m2
   const desperd = Math.max(0, Number(it.desperdicioPct)||0) / 100;
 
   const ppc = Number(String(it.piezasPorCaja||"").replace(",", ".")) || 0;
@@ -10954,7 +10478,7 @@ function cerCompute(it){
     let cajas = 0;
     if (ppc > 0) cajas = Math.ceil(piezas / ppc);
 
-    
+    // stock interpretado según unidad elegida
     let stockPiezas = stock;
     let stockCajas = stock;
 
@@ -10986,7 +10510,7 @@ function cerCompute(it){
     };
   }
 
-  
+  // modo TENGO
   const tengo = Number(String(it.tengoCant||"").replace(",", ".")) || 0;
   if (!tengo || tengo <= 0) return { ok:false, msg:"Ingresa cuánta cerámica tienes.", areaPieza };
 
@@ -11046,7 +10570,7 @@ function cerRefreshItem(itemId){
   const lbl = el("cerWasteLbl_"+itemId);
   if (lbl) lbl.textContent = `${__fmtInt(it.desperdicioPct)}%`;
 
-  
+  // update picked summary
   const prodBox = el("cerProd_"+itemId);
   if (prodBox) {
     if (it.cerNombre) {
@@ -11105,7 +10629,7 @@ function cerRefreshSummary(){
   `;
 }
 
-
+/* --- Modal pick cerámica --- */
 
 function setCerPickTab(tab){
   cerPickTab = String(tab || "TODAS");
@@ -11125,9 +10649,9 @@ function openPickCeramica(itemId){
 
   cerPickTarget = { type:"DOC", itemId: id };
 
-  
+  // asegurarnos que el catálogo está listo
   if (!catalogoCargado) {
-    
+    // no bloqueamos: igual abrimos y mostramos mensaje
   }
 
   const s = el("pickCeramicaSearch");
@@ -11185,7 +10709,7 @@ function renderPickCeramicaList(){
     return;
   }
 
-  
+  // limitar para rendimiento
   const max = 200;
   const shown = items.slice(0, max);
 
@@ -11238,14 +10762,14 @@ function pickCeramica(codeEnc){
   it.cerCategoria = __cerCategoria(p) || "CERÁMICA";
   it.stockTotal = Number(p.stockTotal || 0);
 
-  
+  // Autodetección de unidad / Pz/Caja desde nombre/alias (si aplica)
   try {
     const info = __parseCajaInfo(p);
 
-    
+    // Unidad sugerida (si la detectamos)
     if (info?.unidad) it.inventarioUnidad = (info.unidad === "CAJA") ? "CAJA" : "PIEZA";
 
-    
+    // Reset por defecto
     it.ppcHint = "";
     it.ppcAuto = false;
     it.m2PorCaja = "";
@@ -11258,7 +10782,7 @@ function pickCeramica(codeEnc){
       it.m2PorCaja = String(info.m2Caja);
       it.ppcAuto = true;
 
-      
+      // Si ya está el tamaño, estimamos Pz/Caja con base en m²/caja
       __maybeAutoPpc(it);
 
       if (!String(it.piezasPorCaja || "").trim()) {
@@ -11278,22 +10802,22 @@ function pickCeramica(codeEnc){
   }
 }
 
-
+/* --- Guardar / Historial --- */
 
 function cerSaveDoc(){
   if (!ceramicaDraft) return;
 
-  
+  // Guardar snapshot limpio
   const snap = JSON.parse(JSON.stringify(ceramicaDraft));
   snap.modificado = Date.now();
 
-  
+  // Validación básica
   if (!Array.isArray(snap.items) || !snap.items.length) {
     alert("Agrega al menos 1 cálculo.");
     return;
   }
 
-  
+  // upsert
   ceramicaDocs = Array.isArray(ceramicaDocs) ? ceramicaDocs : [];
   const idx = ceramicaDocs.findIndex(x => String(x?.id) === String(snap.id));
   if (idx >= 0) ceramicaDocs[idx] = snap;
@@ -11354,16 +10878,16 @@ async function cerExportPdfFromHistory(id){
   }
 }
 
-
+/* --- PDF --- */
 
 async function autoShareLastFile(){
-  
+  // Android (WebView puente)
   if (window.Android && typeof window.Android.guardarPdfBase64 === "function") {
     try { compartirArchivo(); } catch {}
     return;
   }
 
-  
+  // Web Share API (si soporta archivos)
   try {
     if (navigator.share && lastFile?.blob) {
       const f = new File([lastFile.blob], lastFile.filename || "archivo.pdf", { type: lastFile.mime || "application/pdf" });
@@ -11377,10 +10901,10 @@ async function autoShareLastFile(){
       }
     }
   } catch (e) {
-    
+    // si cancela share, seguimos con fallback
   }
 
-  
+  // fallback
   try { window.open(lastFile.url, "_blank"); } catch { try { descargarArchivo(); } catch {} }
 }
 
@@ -11392,12 +10916,12 @@ async function cerExportPdf(){
     return;
   }
 
-  
+  // Guardar antes de exportar (práctico para reusar)
   try { cerSaveDoc(); } catch {}
 
   try {
     await crearPdfCeramica(ceramicaDraft);
-    await autoShareLastFile(); 
+    await autoShareLastFile(); // ✅ compartir automáticamente
   } catch(e){
     console.error(e);
     alert("❌ No se pudo generar el PDF.");
@@ -11434,7 +10958,7 @@ async function crearPdfCeramica(docData){
   }
 
   function header(){
-    
+    // watermark suave
     doc.setTextColor(180, 180, 180);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(18);
@@ -11602,7 +11126,7 @@ async function crearPdfCeramica(docData){
 }
 
 
-
+/* ================= RECEPCION: INGRESOS + HISTORIAL ================= */
 
 function ensureRecepcionStateLoaded(force = false){
   if (recepcionLoaded && !force) return;
@@ -12019,11 +11543,11 @@ function actualizarPreviewRecepcionIngreso(){
 }
 
 function getProdByAliasRecepcion(alias){
-  
+  // primero buscar en catálogo maestro
   const p = getProdByAlias(alias);
   if (p) return p;
 
-  
+  // luego buscar en catálogo local de recepción
   try {
     ensureRecepcionStateLoaded();
     const loc = recepcionCatalogoLocal ? recepcionCatalogoLocal[alias] : null;
@@ -12069,7 +11593,7 @@ function recepAddProdToIngreso(prod, alias, qty = 1){
   const nombre = String(prod?.producto || "").trim();
   const al = String(alias || prod?.alias || "").trim();
 
-  
+  // buscar existente por código o alias
   const items = Array.isArray(recepcionIngresoDoc.items) ? recepcionIngresoDoc.items : [];
   let it = null;
 
@@ -12099,7 +11623,7 @@ function recepAddProdToIngreso(prod, alias, qty = 1){
 }
 
 
-
+/* ===== RECEPCION: NUEVO ALIAS ===== */
 
 let __recNewAliasPrefill = "";
 
@@ -12148,12 +11672,12 @@ function guardarRecepNuevoProd(){
 
   cerrarModalRecepNuevoProd();
 
-  
+  // agregar al ingreso si hay uno abierto
   try { recepAddProdToIngreso({ codigo: codigo || "", producto: nombre, alias }, alias); } catch {}
 }
 
 function abrirModalRecepSugCodigo(){
-  
+  // Necesitamos el nombre para comparar
   const name = String(el("recNewNombre")?.value || "").trim();
   if (el("recSugQuery")) el("recSugQuery").value = name;
   openModal("modalRecepSugCodigo");
@@ -12195,7 +11719,7 @@ function _simScore(a, b){
   const union = new Set([...setA, ...setB]).size || 1;
   let j = inter / union;
 
-  
+  // bonus por substring
   if (B.includes(A) || A.includes(B)) j += 0.35;
 
   return Math.min(1, j);
@@ -12229,7 +11753,7 @@ function renderRecepSugCodigoList(force = false){
     return;
   }
 
-  
+  // asegurar catálogo maestro (async sin bloquear UI)
   try {
     if (!Array.isArray(catalogo) || !catalogo.length) {
       cont.innerHTML = `
@@ -12284,7 +11808,7 @@ function seleccionarRecepCodigo(codigo){
   setTimeout(() => el("recNewCodigo")?.focus(), 40);
 }
 
-
+/* ===== RECEPCION: GUARDAR + EXPORTAR ===== */
 
 function sanitizeRecepcionDoc(doc){
   const d = JSON.parse(JSON.stringify(doc || {}));
@@ -12318,7 +11842,7 @@ function guardarIngresoRecepcion(silent = false){
   d.updatedAtISO = new Date().toISOString();
   if (!d.createdAtISO) d.createdAtISO = d.updatedAtISO;
 
-  
+  // guardar / actualizar
   const arr = Array.isArray(recepcionIngresos) ? recepcionIngresos : [];
   const idx = arr.findIndex(x => String(x?.id) === String(recepcionEditId || d.id));
 
@@ -12332,7 +11856,7 @@ function guardarIngresoRecepcion(silent = false){
   recepcionIngresos = arr;
   persistRecepcionIngresos();
 
-  
+  // ✅ Ya está guardado en historial, limpiamos borrador
   recepcionIngresoDoc = d;
   setRecepcionDraft(null);
 
@@ -12416,7 +11940,7 @@ async function crearPdfRecepcionIngreso(d){
     y += lines.length * lineH;
   }
 
-  
+  // Encabezado
   textLine("FERRETERÍA UNIVERSAL", 11, true);
   textLine("INGRESO - RECEPCIÓN", 10, true);
   y += 1;
@@ -12430,7 +11954,7 @@ async function crearPdfRecepcionIngreso(d){
   doc.line(marginL, y, marginR, y);
   y += 3;
 
-  
+  // Items
   const items = Array.isArray(d.items) ? d.items : [];
   items.forEach((it, idx) => {
     const qty = Number(it.cantidad || 0) || 0;
